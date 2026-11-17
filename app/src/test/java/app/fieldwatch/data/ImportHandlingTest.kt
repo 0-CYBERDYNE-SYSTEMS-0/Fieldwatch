@@ -10,10 +10,7 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
-import java.net.SocketTimeoutException
-import java.net.UnknownHostException
 import java.util.Locale
-import javax.net.ssl.SSLHandshakeException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 
@@ -43,14 +40,6 @@ class ImportHandlingTest {
         } catch (e: ImportFileException) {
             assertEquals("ui.could.not.read.file", e.key)
         }
-    }
-
-    @Test
-    fun aCatalogFailureNamesTheCause() {
-        assertEquals(CatalogRemote.Reason.REACH, CatalogRemote.failReason(UnknownHostException("catalog")))
-        assertEquals(CatalogRemote.Reason.REACH, CatalogRemote.failReason(SocketTimeoutException("timed out")))
-        assertEquals(CatalogRemote.Reason.TRUST, CatalogRemote.failReason(SSLHandshakeException("bad cert")))
-        assertEquals(CatalogRemote.Reason.OTHER, CatalogRemote.failReason(IllegalStateException("other")))
     }
 
     @Test

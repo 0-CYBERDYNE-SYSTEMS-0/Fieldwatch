@@ -91,7 +91,7 @@ internal object CoverageLines {
         en("report.off", "off", LanguageSlot.CONTROL),
         en("report.window.sit", "sit {name} ({start} → {end} UTC)", LanguageSlot.BODY),
         en("report.window.last", "last 15 minutes ({start} → {end} UTC)", LanguageSlot.BODY),
-        en("report.heading.sit", "FIELDWATCH SIT — {name}", LanguageSlot.BODY),
+        en("report.heading.sit", "SW33P3R_ SIT — {name}", LanguageSlot.BODY),
         en("report.env.counts", "({aps} APs, {ble} BLE, {persist} persistent APs, traveled {dist}, span {span}.)", LanguageSlot.BODY),
         en("report.fast.pair.count", "Google Fast Pair in pairing mode: {n} radios.", LanguageSlot.BODY),
         en("report.rand.high", "High randomized BLE ({n}) — typical of phones, not a tracking finding.", LanguageSlot.BODY),

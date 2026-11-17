@@ -1837,6 +1837,7 @@ private fun TakFeedSettings(
     }
 }
 
+@Composable
 private fun StationFeedSettings(settings: AppSettings, vm: FieldwatchViewModel) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     val status by vm.stationStatus.collectAsStateWithLifecycle()

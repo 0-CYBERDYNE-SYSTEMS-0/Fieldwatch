@@ -1597,7 +1597,7 @@ object DebriefPdf {
             isAntiAlias = true
             letterSpacing = 0.12f
         }
-        canvas.drawText("FIELDWATCH", MARGIN, 26f, title)
+        canvas.drawText("SW33P3R_", MARGIN, 26f, title)
         val sub = Paint().apply {
             color = Color.parseColor("#C8D0D8")
             textSize = 9f

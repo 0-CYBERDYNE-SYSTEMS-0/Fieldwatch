@@ -115,7 +115,7 @@ class LanguagePackTest {
             ),
         )
         assertEquals(
-            "Language packs are made by other people. They are not reviewed or certified by Off Grid Pete LLC.",
+            "Language packs are made by other people. They are not reviewed or certified by sw33p3r_.",
             OfficialSentences.NOT_REVIEWED,
         )
         assertEquals(
