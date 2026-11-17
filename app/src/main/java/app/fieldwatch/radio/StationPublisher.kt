@@ -46,7 +46,7 @@ data class StationFeedStatus(
  * Privacy mode pauses the feed, like TAK.
  */
 class StationPublisher {
-    private val io = Executors.newSingleThreadExecutor { r -> Thread(r, "fieldwatch-station") }
+    private var io = Executors.newSingleThreadExecutor { r -> Thread(r, "fieldwatch-station") }
     private val inFlight = AtomicBoolean(false)
     @Volatile private var lastTickAt = 0L
     /** Hears with lastSeen after this have not reached the station yet. Advances only on success. */
@@ -104,6 +104,11 @@ class StationPublisher {
     }
 
     fun close() {
+        // Let any queued batch finish, then retire the thread so an idle
+        // executor doesn't linger; a fresh one takes over if scanning restarts.
+        // close() and publish() run on the same main thread, so the swap is safe.
+        io.shutdown()
+        io = Executors.newSingleThreadExecutor { r -> Thread(r, "fieldwatch-station") }
         sentThrough = 0L
         lastTickAt = 0L
         _status.value = StationFeedStatus()
@@ -148,7 +153,7 @@ class StationPublisher {
                 if (fix != null && PayloadLocation.validCoord(fix.first, fix.second)) {
                     put("lat", fix.first)
                     put("lon", fix.second)
-                    if (accuracyM != null) put("acc_m", accuracyM.toDouble())
+                    if (accuracyM != null && accuracyM.isFinite()) put("acc_m", accuracyM.toDouble())
                 }
                 put("hears", hears)
             }
@@ -169,7 +174,7 @@ class StationPublisher {
             if (PayloadLocation.validCoord(d.payloadLat, d.payloadLon)) {
                 put("self_lat", d.payloadLat!!)
                 put("self_lon", d.payloadLon!!)
-                d.payloadAlt?.let { put("self_alt_ft", it * 3.28084) }
+                d.payloadAlt?.takeIf { it.isFinite() }?.let { put("self_alt_ft", it * 3.28084) }
             }
             d.payloadHeading?.takeIf { it.isFinite() && it >= 0 && it < 360 }?.let { put("track_deg", it) }
             d.payloadSpeed?.takeIf { it.isFinite() && it >= 0 }?.let { put("speed_kt", it * 1.9438444924406) }

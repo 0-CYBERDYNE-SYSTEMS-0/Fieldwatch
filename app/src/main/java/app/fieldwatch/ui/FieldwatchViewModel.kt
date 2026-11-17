@@ -3002,26 +3002,6 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-
-    fun checkForAppUpdate() {
-        if (appUpdateJob?.isActive == true) return
-        val token = ++appUpdateToken
-        appUpdateJob = viewModelScope.launch {
-            _appUpdate.value = AppUpdatePrompt.Checking
-            val prompt = try {
-                lookForAppUpdate(fromSettings = true) ?: AppUpdatePrompt.Unreachable
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                AppUpdatePrompt.Unreachable
-            }
-            if (token != appUpdateToken) return@launch
-            if (_appUpdate.value !is AppUpdatePrompt.Checking) return@launch
-            if (prompt is AppUpdatePrompt.Offer) offeredUpdate = prompt.note
-            _appUpdate.value = prompt
-        }
-    }
-
     fun installOfferedUpdate() {
         val note = (_appUpdate.value as? AppUpdatePrompt.Offer)?.note ?: offeredUpdate ?: return
         if (_appUpdate.value is AppUpdatePrompt.Downloading) return
@@ -3500,10 +3480,20 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         )
     }
 
-    /** Closes the catalog notice and opens the app-update check. */
+    /**
+     * Custom sw33p3r_ build: the upstream app updater is disabled on purpose.
+     * A check would fetch the OFFICIAL upstream APK and offer to install it,
+     * which would replace this custom Station build. Every path to
+     * lookForAppUpdate/installOfferedUpdate goes through here, so no-op makes
+     * the whole updater unreachable.
+     */
+    fun checkForAppUpdate() {
+        // Disabled in this build: no network check, no update offer.
+    }
+
+    /** Closes the catalog notice. App-update checking is disabled in this build. */
     fun updateAppFromCatalogNotice() {
         consumeExportNotice()
-        checkForAppUpdate()
     }
 
     /** A failed import names the reason. [kept] adds that this phone was not changed. */
