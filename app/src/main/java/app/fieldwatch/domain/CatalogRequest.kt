@@ -40,7 +40,7 @@ internal object CatalogRequest {
     private fun body(name: String, peers: List<Sighting>): String {
         val same = peers.filter { it.kind == RadioKind.BLE && it.name.trim().equals(name, ignoreCase = true) }
         val lines = ArrayList<String>(8)
-        lines += "Catalog request from Fieldwatch. A factory-style Bluetooth name heard on ${addresses(name, peers).size} addresses. Not a finished signature."
+        lines += "Catalog request from sw33p3r_. A factory-style Bluetooth name heard on ${addresses(name, peers).size} addresses. Not a finished signature."
         lines += ""
         lines += "Name: $name"
         lines += "Radio: Bluetooth"

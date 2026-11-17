@@ -1010,6 +1010,26 @@ fun SettingsScreen(
             }
             }
 
+            if (topic == SettingsTopic.STATION) {
+            SectionCard("sw33p3r_ Station", showTitle = false) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Station feed", Modifier.weight(1f))
+                FieldwatchSwitch(settings.stationEnabled, { on -> vm.updateSettings { it.copy(stationEnabled = on) } })
+            }
+            Text(
+                "Off by default. Sends every hear (MAC, name, RSSI, channel, signature class) and this phone's GPS fix " +
+                    "as JSON to a sw33p3r_ Station once a second. At the desk: plug in USB, run " +
+                    "`adb reverse tcp:8741 tcp:8741` on the station, and keep the default URL. " +
+                    "Nothing else is sent anywhere. Privacy mode pauses the feed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (settings.stationEnabled) {
+                StationFeedSettings(settings, vm)
+            }
+            }
+            }
+
             if (topic == SettingsTopic.LOGGING) {
             SectionCard(LanguageText.text("settings.topic.logging"), showTitle = false) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1113,11 +1133,6 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(LanguageText.text("ui.import.signatures")) }
             FieldwatchActionButton(
-                onClick = vm::updateStockCatalogFromGitHub,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(LanguageText.text("ui.update.stock.catalog.github")) }
-
-            FieldwatchActionButton(
                 onClick = { confirmRestore = true },
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -1180,18 +1195,8 @@ fun SettingsScreen(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FieldwatchActionButton(
-                onClick = vm::checkForAppUpdate,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(LanguageText.text("update.settings")) }
             Text(
-                LanguageText.text("update.settings.note"),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Text(
-                "Fieldwatch ${app.fieldwatch.BuildConfig.VERSION_NAME}  ·  Catalog ${state.catalogVersion}",
+                "sw33p3r_ ${app.fieldwatch.BuildConfig.VERSION_NAME}  ·  Catalog ${state.catalogVersion}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1432,6 +1437,7 @@ private enum class SettingsTopic(val titleKey: String) {
     TRUSTED("settings.topic.trusted"),
     TRACKER("settings.topic.tracker"),
     TAK("settings.topic.tak"),
+    STATION("settings.topic.station"),
     LOGGING("settings.topic.logging"),
     SIGNATURES("settings.topic.signatures"),
     LANGUAGE("settings.topic.language"),
@@ -1488,6 +1494,11 @@ private fun SettingsTopicList(
             settings.takEnabled && settings.demoMode -> LanguageText.text("ui.paused.label")
             settings.takEnabled -> "On · ${TakInstall.callsign(settings.takCallsign, takInstallTag)}"
             else -> LanguageText.text("ui.off.label")
+        },
+        SettingsTopic.STATION to when {
+            settings.stationEnabled && settings.demoMode -> "Paused"
+            settings.stationEnabled -> "On"
+            else -> "Off"
         },
         SettingsTopic.LOGGING to if (settings.loggingEnabled) LanguageText.text("ui.on.label") else LanguageText.text("ui.off.label"),
         SettingsTopic.SIGNATURES to "Catalog $catalogVersion",
@@ -1567,7 +1578,6 @@ private fun SettingsTopicRow(title: String, value: String, onClick: () -> Unit) 
 
 @Composable
 private fun CreditFooter() {
-    val context = LocalContext.current
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = Modifier
@@ -1577,55 +1587,10 @@ private fun CreditFooter() {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            LanguageText.text("ui.copyright.c.2026.off"),
+            "sw33p3r_",
             style = MaterialTheme.typography.labelSmall,
             color = muted,
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SocialChip(
-                icon = R.drawable.ic_instagram,
-                label = LanguageText.text("ui.offgridpete.label"),
-                tint = muted,
-                onClick = { openUrl(context, "https://instagram.com/OffGridPete") },
-            )
-            SocialChip(
-                icon = R.drawable.ic_x,
-                label = LanguageText.text("ui.ogridpete.label"),
-                tint = muted,
-                onClick = { openUrl(context, "https://x.com/OGridPete") },
-            )
-        }
-    }
-}
-
-@Composable
-private fun SocialChip(
-    icon: Int,
-    label: String,
-    tint: Color,
-    onClick: () -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(99.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-        modifier = Modifier.clickable(onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = label,
-                tint = tint,
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
-        }
     }
 }
 
@@ -1870,6 +1835,48 @@ private fun TakFeedSettings(
     }
     Note(LanguageText.text("ui.adds.note.phone.s"))
     }
+}
+
+@Composable
+private fun StationFeedSettings(settings: AppSettings, vm: FieldwatchViewModel) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val status by vm.stationStatus.collectAsStateWithLifecycle()
+    var urlText by remember { mutableStateOf(settings.stationUrl) }
+    var idText by remember { mutableStateOf(settings.stationSensorId) }
+    LaunchedEffect(settings.stationUrl) { urlText = settings.stationUrl }
+    LaunchedEffect(settings.stationSensorId) { idText = settings.stationSensorId }
+    FieldwatchOutlinedField(
+        value = urlText,
+        onValueChange = { value ->
+            urlText = value
+            val trimmed = value.trim()
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                vm.updateSettings { it.copy(stationUrl = trimmed) }
+            }
+        },
+        label = "Station URL",
+        placeholder = app.fieldwatch.radio.StationDefaults.URL,
+        enabled = !settings.demoMode,
+    )
+    FieldwatchOutlinedField(
+        value = idText,
+        onValueChange = { value ->
+            idText = value
+            vm.updateSettings { it.copy(stationSensorId = value.trim()) }
+        },
+        label = "Sensor id",
+        placeholder = app.fieldwatch.radio.StationDefaults.sensorId(),
+        enabled = !settings.demoMode,
+    )
+    Text(stationStatusLine(status), style = MaterialTheme.typography.bodySmall, color = muted)
+}
+
+private fun stationStatusLine(status: app.fieldwatch.radio.StationFeedStatus): String {
+    if (status.paused) return "Feed status  ·  paused (Privacy mode)"
+    val whenAt = takStatusWhen(status.at)
+    if (status.error != null) return "Feed status  ·  ${status.error}" + if (whenAt.isNotEmpty()) "  ·  $whenAt" else ""
+    if (status.at <= 0L) return "Feed status  ·  no send yet (start scanning)"
+    return "Feed status  ·  ${status.batches} batches  ·  last ${status.sent} hears  ·  $whenAt"
 }
 
 private fun takStatusLine(status: TakFeedStatus): String {

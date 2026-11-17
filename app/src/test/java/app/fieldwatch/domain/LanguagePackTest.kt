@@ -115,7 +115,7 @@ class LanguagePackTest {
             ),
         )
         assertEquals(
-            "Language packs are made by other people. They are not reviewed or certified by Off Grid Pete LLC.",
+            "Language packs are made by other people. They are not reviewed or certified by sw33p3r_.",
             OfficialSentences.NOT_REVIEWED,
         )
         assertEquals(
@@ -134,7 +134,7 @@ class LanguagePackTest {
         assertTrue(EnglishCopy.lines.none { it.text == OfficialSentences.AI })
         assertTrue(EnglishCopy.lines.none { it.text == OfficialSentences.AUTHOR_GUIDE })
         assertEquals("Export English template", LanguageExportCopy.BUTTON)
-        assertEquals("Fieldwatch English template", LanguageExportCopy.SHARE)
+        assertEquals("sw33p3r_ English template", LanguageExportCopy.SHARE)
         assertEquals("Could not export the English template", LanguageExportCopy.FAILED)
         assertTrue(EnglishCopy.lines.none { it.key == "language.export" || it.key == "ui.fieldwatch.english.template" || it.key == "ui.could.not.export.english" })
     }
@@ -181,7 +181,7 @@ class LanguagePackTest {
             EnglishCopy.text(LanguageErrors.SIGNATURES),
         )
         assertEquals(
-            "Not a Fieldwatch language pack.",
+            "Not a sw33p3r_ language pack.",
             EnglishCopy.text(LanguageErrors.NOT_PACK),
         )
         val big = ByteArray(LanguagePack.MAX_BYTES + 1) { ' '.code.toByte() }
@@ -227,22 +227,22 @@ class LanguagePackTest {
         assertTrue(current.newKeys.contains("cell.master"))
         assertFalse(current.newKeys.contains("tab.pause"))
         val since138 = ok(pack("tab.live" to "Direct", writtenFor = "1.1.38"))
-        assertEquals(133, since138.newSince)
+        assertEquals(134, since138.newSince)
         assertTrue(since138.newKeys.contains("update.now"))
         val since140 = ok(pack("tab.live" to "Direct", writtenFor = "1.1.40"))
-        assertEquals(119, since140.newSince)
+        assertEquals(120, since140.newSince)
         assertTrue(since140.newKeys.contains("update.notes"))
         val since141 = ok(pack("tab.live" to "Direct", writtenFor = "1.1.41"))
-        assertEquals(118, since141.newSince)
+        assertEquals(119, since141.newSince)
         assertTrue(since141.newKeys.contains("ui.signal.lost"))
         val since142 = ok(pack("tab.live" to "Direct", writtenFor = "1.1.42"))
-        assertEquals(115, since142.newSince)
+        assertEquals(116, since142.newSince)
         assertTrue(since142.newKeys.contains("class.twoway"))
         assertTrue(since142.newKeys.contains("class.military"))
         assertTrue(since142.newKeys.contains("catalog.needs.app.title"))
         assertTrue(since142.newKeys.contains("ui.catalog.request"))
         val caughtUp = ok(pack("tab.live" to "Direct", writtenFor = "1.1.43"))
-        assertEquals(108, caughtUp.newSince)
+        assertEquals(109, caughtUp.newSince)
         val shipped = ok(pack("tab.live" to "Direct", writtenFor = "1.1.44"))
         assertEquals(0, shipped.newSince)
         val missing = ok(pack("tab.live" to "Direct"))
@@ -517,7 +517,7 @@ class LanguagePackTest {
         assertFalse(remarks.contains("HACKED"))
         val xml = CotEvent.selfXml(1.0, 2.0, 0L, "AB23", "Scout")
         assertTrue(xml.contains("type=\"a-f-G-U-C\""))
-        assertTrue(xml.contains("Fieldwatch TAK heartbeat (this phone)"))
+        assertTrue(xml.contains("sw33p3r_ TAK heartbeat (this phone)"))
         assertFalse(xml.contains("HACKED"))
         val pin = CotEvent.remarks(sighting("aa", "Porch"), emptyList(), advertised = false)
         assertTrue(pin.contains("heard here (operator GPS)"))
@@ -534,9 +534,9 @@ class LanguagePackTest {
     }
 
     @Test
-    fun launcherNameStaysFieldwatch() {
+    fun launcherNameIsSw33p3r() {
         val xml = repoFile("src/main/res/values/strings.xml").readText()
-        assertTrue(xml.contains(">Fieldwatch<"))
+        assertTrue(xml.contains(">sw33p3r_<"))
     }
 
     @Test

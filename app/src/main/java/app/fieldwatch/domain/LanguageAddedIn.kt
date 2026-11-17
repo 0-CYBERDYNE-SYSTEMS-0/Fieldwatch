@@ -649,6 +649,7 @@ internal object LanguageAddedIn {
         put("settings.topic.location.maps", "1.1.31")
         put("settings.topic.maps", "1.1.31")
         put("settings.topic.tracker", "1.1.44")
+        put("settings.topic.station", "1.1.44")
         put("settings.topic.trusted", "1.1.35")
         put("sit.drop", "1.1.35")
         put("sit.hm", "1.1.35")

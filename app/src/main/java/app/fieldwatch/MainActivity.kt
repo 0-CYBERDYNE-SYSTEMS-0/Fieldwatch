@@ -116,6 +116,6 @@ class MainActivity : ComponentActivity() {
 
     private fun copyNote(text: String) {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("Fieldwatch crash", text))
+        clipboard.setPrimaryClip(ClipData.newPlainText("sw33p3r_ crash", text))
     }
 }

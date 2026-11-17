@@ -128,8 +128,8 @@ class TakPublisher(context: Context? = null) {
                     lat = selfFix!!.first,
                     lon = selfFix.second,
                     now = now,
-                    callsign = "Fieldwatch",
-                    remarks = "Fieldwatch · gone",
+                    callsign = "sw33p3r_",
+                    remarks = "sw33p3r_ · gone",
                 )
                 if (sendAll(dests, xml.toByteArray(Charsets.UTF_8))) {
                     if (legacySelfSent.compareAndSet(false, true)) legacyJustSent = true
@@ -425,7 +425,7 @@ class TakPublisher(context: Context? = null) {
             val xml = if (face != null) {
                 CotEvent.tombstoneXml(uid, spot.lat, spot.lon, now, face.callsign, face.remarks)
             } else {
-                CotEvent.tombstoneXml(uid, spot.lat, spot.lon, now, callsign, "Fieldwatch · gone")
+                CotEvent.tombstoneXml(uid, spot.lat, spot.lon, now, callsign, "sw33p3r_ · gone")
             }
             if (!sendAll(dests, xml.toByteArray(Charsets.UTF_8))) return
             last.remove(uid)

@@ -168,7 +168,7 @@ object LanguagePack {
         val newlines = preview.issues.filterIsInstance<LanguageIssue.Newline>().map { it.key }.sorted()
         val imported = preview.accepted.keys.sorted()
         return buildString {
-            appendLine("Fieldwatch language pack report")
+            appendLine("sw33p3r_ language pack report")
             appendLine()
             appendLine("Language: ${preview.language}")
             preview.languageTag?.let { appendLine("Tag: $it") }

@@ -68,7 +68,9 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ""
+            // Station builds install beside the official app (different id, no release key needed).
+            applicationIdSuffix = ".station"
+            versionNameSuffix = "-station"
             isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true

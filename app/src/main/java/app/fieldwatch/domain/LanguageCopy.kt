@@ -60,7 +60,7 @@ object BundledLanguages {
 /** Compiled sentences a pack cannot replace. Not keys. */
 object OfficialSentences {
     const val NOT_REVIEWED =
-        "Language packs are made by other people. They are not reviewed or certified by Off Grid Pete LLC."
+        "Language packs are made by other people. They are not reviewed or certified by sw33p3r_."
     const val AI =
         "This language was translated with AI. If a line is wrong, please open a GitHub issue."
     const val AUTHOR_GUIDE =
@@ -72,20 +72,20 @@ object OfficialSentences {
 /** Export of the English map. Compiled, not pack keys, so a translation cannot rename what is exported. */
 object LanguageExportCopy {
     const val BUTTON = "Export English template"
-    const val SHARE = "Fieldwatch English template"
+    const val SHARE = "sw33p3r_ English template"
     const val FAILED = "Could not export the English template"
 }
 
 /** Import report. Compiled, like the author guide, so the file a translator reads stays English. */
 object LanguageReportCopy {
-    const val SHARE = "Fieldwatch language pack report"
+    const val SHARE = "sw33p3r_ language pack report"
     const val FAILED = "Could not save the language report"
     const val FILE = "fieldwatch-language-report.txt"
 }
 
 /** First-run import door. English, compiled, not pack keys. */
 object LanguageDoorCopy {
-    const val TITLE = "Fieldwatch is in English"
+    const val TITLE = "sw33p3r_ is in English"
     const val BODY = "You can import a language-pack file if you already have one."
     const val CONTINUE = "Continue in English"
     const val IMPORT = "Import a language file"
@@ -268,8 +268,8 @@ private fun buildLines(): List<EnglishLine> = listOf(
     en("catalog.failed.server.code", "GitHub did not send the catalog ({code}).", LanguageSlot.BODY),
     en("catalog.failed.empty", "GitHub sent an empty catalog.", LanguageSlot.BODY),
     en("catalog.failed.read", "The catalog could not be read.", LanguageSlot.BODY),
-    en("catalog.needs.app.title", "Update Fieldwatch first", LanguageSlot.CONTROL),
-    en("catalog.needs.app.body", "This needs a newer Fieldwatch. Update the app, then try again.", LanguageSlot.BODY),
+    en("catalog.needs.app.title", "Update sw33p3r_ first", LanguageSlot.CONTROL),
+    en("catalog.needs.app.body", "This needs a newer sw33p3r_. Update the app, then try again.", LanguageSlot.BODY),
     en("settings.layer.saved", "Saved {date}", LanguageSlot.CONTROL),
     en("settings.layer.channel", "Map layer alerts", LanguageSlot.CONTROL),
     en("settings.layer.channel.body", "Known mapped cameras, not detected signals.", LanguageSlot.BODY),
@@ -312,9 +312,9 @@ private fun buildLines(): List<EnglishLine> = listOf(
     en("map.key.label", "Map key", LanguageSlot.BODY),
     en("map.key.hint", "Paste the key from your account. It stays on this phone and is not in Export settings.", LanguageSlot.BODY),
     en("map.key.missing.title", "This map needs a key", LanguageSlot.BODY),
-    en("map.key.missing.body", "Paste the key from your account. Fieldwatch keeps it on this phone.", LanguageSlot.BODY),
+    en("map.key.missing.body", "Paste the key from your account. sw33p3r_ keeps it on this phone.", LanguageSlot.BODY),
     en("map.key.denied.title", "Key not saved", LanguageSlot.BODY),
-    en("map.key.denied.body", "Fieldwatch did not store that. Use the key from your account. Only letters, numbers, and . - _ are kept.", LanguageSlot.BODY),
+    en("map.key.denied.body", "sw33p3r_ did not store that. Use the key from your account. Only letters, numbers, and . - _ are kept.", LanguageSlot.BODY),
     en("map.key.rejected.title", "Map key was rejected", LanguageSlot.BODY),
     en("map.key.rejected.body", "The map service did not accept this key. Check the key and that the account allows this app.", LanguageSlot.BODY),
     en("map.key.failed.title", "Map did not load", LanguageSlot.BODY),
@@ -401,13 +401,13 @@ private fun buildLines(): List<EnglishLine> = listOf(
     en("language.section.add", "Add", LanguageSlot.CONTROL),
     en(
         "language.section.add.about",
-        "Import a language file that does not come with the app. Fieldwatch does not download one.",
+        "Import a language file that does not come with the app. sw33p3r_ does not download one.",
         LanguageSlot.BODY,
     ),
     en("language.section.remove", "Remove", LanguageSlot.CONTROL),
     en(
         "language.section.remove.about",
-        "Remove the imported file on this phone. Fieldwatch then follows the phone language.",
+        "Remove the imported file on this phone. sw33p3r_ then follows the phone language.",
         LanguageSlot.BODY,
     ),
     en(
@@ -418,7 +418,7 @@ private fun buildLines(): List<EnglishLine> = listOf(
     en("language.remove.title", "Remove this language pack?", LanguageSlot.BODY),
     en(
         "language.remove.body",
-        "This deletes the imported file on this phone.\n\nFieldwatch then follows the phone language.",
+        "This deletes the imported file on this phone.\n\nsw33p3r_ then follows the phone language.",
         LanguageSlot.BODY,
     ),
     en("language.import.action", "Import", LanguageSlot.CONTROL),
@@ -500,7 +500,7 @@ private fun buildLines(): List<EnglishLine> = listOf(
         "That is a signature pack. Use Import signatures.",
         LanguageSlot.BODY,
     ),
-    en("language.err.not", "Not a Fieldwatch language pack.", LanguageSlot.BODY),
+    en("language.err.not", "Not a sw33p3r_ language pack.", LanguageSlot.BODY),
     en("language.err.empty", "This file is empty.", LanguageSlot.BODY),
     en("language.err.large", "That file is too large.", LanguageSlot.BODY),
     en("language.err.none", "That file has no lines this version can use.", LanguageSlot.BODY),

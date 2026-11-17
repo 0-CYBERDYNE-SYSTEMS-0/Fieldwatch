@@ -36,7 +36,6 @@ import app.fieldwatch.domain.detectionPolicy
 import app.fieldwatch.domain.gnssSettings
 import app.fieldwatch.data.AppUpdateClient
 import app.fieldwatch.data.AppUpdateInstall
-import app.fieldwatch.data.CatalogRemote
 import app.fieldwatch.data.DebriefPdf
 import app.fieldwatch.data.FlockFiles
 import app.fieldwatch.data.ImportFileException
@@ -260,6 +259,7 @@ data class FieldwatchUi(
 
 class FieldwatchViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as FieldwatchApp
+    val stationStatus: kotlinx.coroutines.flow.StateFlow<app.fieldwatch.radio.StationFeedStatus> = app.station.status
     val mapKeyRevision: StateFlow<Int> = app.mapKeys.revision
     val flockIndex: FlockIndex get() = app.flockIndex
     val flockRevision: StateFlow<Int> = app.flockRevision
@@ -907,19 +907,9 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     init {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val prompt = lookForAppUpdate(fromSettings = false)
-                if (prompt is AppUpdatePrompt.Offer && _appUpdate.value == null) {
-                    offeredUpdate = prompt.note
-                    _appUpdate.value = prompt
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                // No answer from GitHub. The app still opens.
-            }
-        }
+        // Custom sw33p3r_ build: upstream app self-update is disabled on purpose.
+        // lookForAppUpdate() must not run — an official APK would replace this
+        // custom Station build (different capabilities, Station feed) on install.
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 val header = FlockFiles.peek(app.filesDir, SensorList.PLATES)
@@ -2175,7 +2165,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun compareSubject(doc: DebriefDoc): String =
-        if (doc.windowLine.isNotBlank()) "Fieldwatch sit compare — ${doc.windowLine}"
+        if (doc.windowLine.isNotBlank()) "sw33p3r_ sit compare — ${doc.windowLine}"
         else LanguageText.text("ui.fieldwatch.sit.compare")
 
     fun startSitCompareAiExport() {
@@ -2197,7 +2187,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "text/plain"
                     putExtra(
                         Intent.EXTRA_SUBJECT,
-                        "Fieldwatch sit compare AI export — ${thisSide.name} vs ${second.name}",
+                        "sw33p3r_ sit compare AI export — ${thisSide.name} vs ${second.name}",
                     )
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
@@ -3012,107 +3002,6 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun updateStockCatalogFromGitHub() {
-        if (_export.value.active) return
-        viewModelScope.launch {
-            if (!PlaceLookup.online(app)) {
-                _export.value = ExportUi(
-                    errorTitle = LanguageText.text("ui.no.internet"),
-                    error = LanguageText.text("ui.no.internet.use.import"),
-                )
-                return@launch
-            }
-            _export.value = ExportUi(
-                active = true,
-                spinner = true,
-                message = LanguageText.text("ui.updating.stock.catalog"),
-            )
-            try {
-                val fetched = withContext(Dispatchers.IO) {
-                    CatalogRemote.fetch(userAgent = "Fieldwatch/${BuildConfig.VERSION_NAME}")
-                }
-                if (fetched is CatalogRemote.Fetch.Failed) {
-                    _export.value = catalogFetchFailure(fetched)
-                    return@launch
-                }
-                val parsed = try {
-                    SignatureExchange.parsePack((fetched as CatalogRemote.Fetch.Ok).text)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (_: CatalogNeedsNewerApp) {
-                    showCatalogNeedsApp()
-                    return@launch
-                } catch (_: Exception) {
-                    showImportProblem(
-                        "ui.could.not.import.catalog",
-                        LanguageText.text("catalog.failed.read"),
-                        kept = true,
-                    )
-                    return@launch
-                }
-                val result = app.config.overlayStockCatalog(parsed.pack)
-                    .copy(skippedDecode = parsed.skippedDecode)
-                if (result.error != null) {
-                    showImportProblem("ui.could.not.import.catalog", result.error, kept = true)
-                    return@launch
-                }
-                if (!result.alreadyLatest) refreshDevicesAfterImport()
-                _export.value = if (result.alreadyLatest) {
-                    ExportUi(
-                        noticeTitle = LanguageText.text("ui.already.latest.catalog"),
-                        noticeMessage = "Already on catalog ${result.catalogVersion}. Nothing to update.",
-                    )
-                } else {
-                    val bits = mutableListOf<String>()
-                    if (result.updated > 0) bits += "updated ${result.updated}"
-                    if (result.added > 0) bits += "added ${result.added}"
-                    val change = if (bits.isEmpty()) LanguageText.text("ui.no.stock.rows.changed")
-                    else bits.joinToString(" · ").replaceFirstChar { it.uppercase() } + "."
-                    val skip = result.skippedDecode > 0
-                    ExportUi(
-                        noticeTitle = LanguageText.text("ui.catalog.updated"),
-                        noticeMessage = "Stock catalog is now ${result.catalogVersion}. $change " +
-                            LanguageText.text("ui.bookmarks.settings.were.not"),
-                        followUpTitle = if (skip) LanguageText.text("ui.signature.decoding.skipped") else null,
-                        followUpMessage = if (skip) {
-                            (LanguageText.text("ui.some.signature.field.maps") + " ") +
-                                LanguageText.text("ui.signatures.still.match.install")
-                        } else {
-                            null
-                        },
-                    )
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                showImportProblem(
-                    "ui.could.not.import.catalog",
-                    LanguageText.text("import.failed.save"),
-                    kept = false,
-                )
-            }
-        }
-    }
-
-    fun checkForAppUpdate() {
-        if (appUpdateJob?.isActive == true) return
-        val token = ++appUpdateToken
-        appUpdateJob = viewModelScope.launch {
-            _appUpdate.value = AppUpdatePrompt.Checking
-            val prompt = try {
-                lookForAppUpdate(fromSettings = true) ?: AppUpdatePrompt.Unreachable
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                AppUpdatePrompt.Unreachable
-            }
-            if (token != appUpdateToken) return@launch
-            if (_appUpdate.value !is AppUpdatePrompt.Checking) return@launch
-            if (prompt is AppUpdatePrompt.Offer) offeredUpdate = prompt.note
-            _appUpdate.value = prompt
-        }
-    }
-
     fun installOfferedUpdate() {
         val note = (_appUpdate.value as? AppUpdatePrompt.Offer)?.note ?: offeredUpdate ?: return
         if (_appUpdate.value is AppUpdatePrompt.Downloading) return
@@ -3591,10 +3480,20 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         )
     }
 
-    /** Closes the catalog notice and opens the app-update check. */
+    /**
+     * Custom sw33p3r_ build: the upstream app updater is disabled on purpose.
+     * A check would fetch the OFFICIAL upstream APK and offer to install it,
+     * which would replace this custom Station build. Every path to
+     * lookForAppUpdate/installOfferedUpdate goes through here, so no-op makes
+     * the whole updater unreachable.
+     */
+    fun checkForAppUpdate() {
+        // Disabled in this build: no network check, no update offer.
+    }
+
+    /** Closes the catalog notice. App-update checking is disabled in this build. */
     fun updateAppFromCatalogNotice() {
         consumeExportNotice()
-        checkForAppUpdate()
     }
 
     /** A failed import names the reason. [kept] adds that this phone was not changed. */
@@ -3606,31 +3505,6 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         )
     }
 
-    private fun catalogFetchFailure(failed: CatalogRemote.Fetch.Failed): ExportUi {
-        val reason = failed.reason
-        val code = failed.code
-        val titleKey = if (reason == CatalogRemote.Reason.REACH) {
-            "ui.could.not.reach.github"
-        } else {
-            "ui.could.not.import.catalog"
-        }
-        val bodyKey = when (reason) {
-            CatalogRemote.Reason.REACH -> "ui.could.not.reach.catalog"
-            CatalogRemote.Reason.TRUST -> "settings.layer.failed.trust"
-            CatalogRemote.Reason.SERVER ->
-                if (code > 0) "catalog.failed.server.code" else "catalog.failed.server"
-            CatalogRemote.Reason.LARGE -> "language.err.large"
-            CatalogRemote.Reason.EMPTY -> "catalog.failed.empty"
-            CatalogRemote.Reason.OTHER -> "ui.could.not.import.catalog.2"
-        }
-        val body = if (reason == CatalogRemote.Reason.SERVER && code > 0) {
-            LanguageText.text(bodyKey, mapOf("code" to code.toString()))
-        } else {
-            LanguageText.text(bodyKey)
-        }
-        val text = body.trim() + " " + LanguageText.text("import.failed.kept")
-        return ExportUi(errorTitle = LanguageText.text(titleKey), error = text)
-    }
 
     /** The pack is already saved. A refresh failure must not look like a bad file. */
     private suspend fun refreshDevicesAfterImport() {
@@ -4214,7 +4088,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "text/plain"
                     putExtra(
                         Intent.EXTRA_SUBJECT,
-                        if (window != null) "Fieldwatch AI export — sit ${window.sitName}"
+                        if (window != null) "sw33p3r_ AI export — sit ${window.sitName}"
                         else LanguageText.text("ui.fieldwatch.ai.export.last"),
                     )
                     putExtra(Intent.EXTRA_TEXT, text)
@@ -4296,7 +4170,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 )
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, "Fieldwatch AI export — $title")
+                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ AI export — $title")
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
             }.onSuccess { intent ->
@@ -4364,7 +4238,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 )
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, "Fieldwatch device detail — $title")
+                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ device detail — $title")
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
             }.onSuccess { intent ->

@@ -38,7 +38,7 @@ object CrashReport {
         reason: String,
         detail: String,
     ): String = buildString {
-        append("Fieldwatch ")
+        append("sw33p3r_ ")
         append(versionName)
         append(" (")
         append(versionCode)

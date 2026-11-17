@@ -539,6 +539,7 @@ class ScanService : LifecycleService() {
             if (plan.xml.isNotEmpty() && app.tak.sendNow(settings, plan.xml)) {
                 app.trusted.commitCot(plan)
             }
+            app.station.publish(live, fleets, settings, app.lastFix, app.lastFixAccuracyM)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -627,6 +628,7 @@ class ScanService : LifecycleService() {
         runCatching { wifi.stop() }
         runCatching { ble.stop() }
         runCatching { (application as FieldwatchApp).tak.close() }
+        runCatching { (application as FieldwatchApp).station.close() }
         val app = application as FieldwatchApp
         app.devices.setScanning(false)
         app.gnss.stop()

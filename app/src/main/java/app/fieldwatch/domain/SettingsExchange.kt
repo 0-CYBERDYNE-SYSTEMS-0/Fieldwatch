@@ -76,7 +76,7 @@ object SettingsExchange {
         } catch (e: Exception) {
             e.needsNewerApp()?.let { throw it }
             throw IllegalArgumentException(
-                "Not a Fieldwatch settings pack. Export from Settings → Export settings.",
+                "Not a sw33p3r_ settings pack. Export from Settings → Export settings.",
                 e,
             )
         }
@@ -90,7 +90,7 @@ object SettingsExchange {
         }
         if (pack.format != SettingsPack.FORMAT) {
             throw IllegalArgumentException(
-                "Not a Fieldwatch settings pack (open a fieldwatch-settings JSON file).",
+                "Not a sw33p3r_ settings pack (open a fieldwatch-settings JSON file).",
             )
         }
         return pack

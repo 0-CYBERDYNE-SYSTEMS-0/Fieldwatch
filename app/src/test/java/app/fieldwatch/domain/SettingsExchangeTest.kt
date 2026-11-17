@@ -245,7 +245,7 @@ class SettingsExchangeTest {
         val (cleared, _) = SettingsExchange.apply(next, blank)
         assertEquals("", cleared.settings.takCallsign)
         assertEquals("AB23", cleared.takInstallTag)
-        assertEquals("Fieldwatch-AB23", TakInstall.callsign(cleared.settings.takCallsign, cleared.takInstallTag))
+        assertEquals("sw33p3r_-AB23", TakInstall.callsign(cleared.settings.takCallsign, cleared.takInstallTag))
     }
 
     @Test
@@ -305,7 +305,7 @@ class SettingsExchangeTest {
             SettingsExchange.parse("{\"version\":68,\"fleets\":[]}")
             throw AssertionError("expected parse to fail")
         } catch (e: IllegalArgumentException) {
-            assertTrue(e.message!!.contains("Not a Fieldwatch settings pack"))
+            assertTrue(e.message!!.contains("Not a sw33p3r_ settings pack"))
         }
     }
 

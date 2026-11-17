@@ -610,7 +610,7 @@ object PathTiles {
             instanceFollowRedirects = token.isEmpty()
             setRequestProperty(
                 "User-Agent",
-                "Fieldwatch/${app.fieldwatch.BuildConfig.VERSION_NAME} (https://github.com/OffGridPete/Fieldwatch)",
+                "sw33p3r_/${app.fieldwatch.BuildConfig.VERSION_NAME}",
             )
         }
         return try {

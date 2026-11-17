@@ -693,7 +693,7 @@ class TakPublishTest {
         val plain = CotEvent.selfXml(40.0, -74.0, 0L, tag, "Fieldwatch-AB23")
         assertTrue(plain.contains("uid=\"FIELDWATCH-SELF-AB23\""))
         assertTrue(plain.contains("callsign=\"Fieldwatch-AB23\""))
-        assertTrue(plain.contains("Fieldwatch TAK heartbeat (this phone)"))
+        assertTrue(plain.contains("sw33p3r_ TAK heartbeat (this phone)"))
         assertFalse(plain.contains("GNSS"))
         val xml = CotEvent.selfXml(40.0, -74.0, 0L, tag, "Fieldwatch-AB23", remarksExtra = "Possible GNSS interference · Medium")
         assertTrue(xml.contains("Possible GNSS interference · Medium"))
@@ -825,7 +825,7 @@ class TakPublishTest {
         )
         assertFalse(shared.contains("via "))
         assertEquals("Scout 1", TakInstall.callsign("Scout 1", other))
-        assertEquals("Fieldwatch-CD34", TakInstall.callsign("", other))
+        assertEquals("sw33p3r_-CD34", TakInstall.callsign("", other))
         assertEquals("Scout 1", TakInstall.callsign("Scout 1", tag))
     }
 

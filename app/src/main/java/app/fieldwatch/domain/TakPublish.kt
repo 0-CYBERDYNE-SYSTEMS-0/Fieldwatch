@@ -55,7 +55,7 @@ object TakInstall {
         val typed = storedCallsign(stored)
         if (typed.isNotEmpty()) return typed
         val mark = clean(tag)
-        return if (mark.isEmpty()) "Fieldwatch" else "Fieldwatch-$mark"
+        return if (mark.isEmpty()) "sw33p3r_" else "sw33p3r_-$mark"
     }
 
     /**
@@ -975,8 +975,8 @@ object CotEvent {
         lat: Double,
         lon: Double,
         now: Long,
-        callsign: String = "Fieldwatch",
-        remarks: String = "Fieldwatch · gone",
+        callsign: String = "sw33p3r_",
+        remarks: String = "sw33p3r_ · gone",
     ): String = eventXml(
         uid = uid,
         cotType = "a-u-G",
@@ -1003,7 +1003,7 @@ object CotEvent {
         remarksExtra: String? = null,
     ): String {
         val remarks = buildString {
-            append("Fieldwatch TAK heartbeat (this phone)")
+            append("sw33p3r_ TAK heartbeat (this phone)")
             val extra = remarksExtra?.trim().orEmpty()
             if (extra.isNotEmpty()) {
                 append('\n')

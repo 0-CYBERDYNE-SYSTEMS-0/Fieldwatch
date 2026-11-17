@@ -97,7 +97,7 @@ object SignatureExchange {
         } catch (e: Exception) {
             e.needsNewerApp()?.let { throw it }
             throw IllegalArgumentException(
-                "Not a Fieldwatch signature pack. Export from Settings → Export signatures.",
+                "Not a sw33p3r_ signature pack. Export from Settings → Export signatures.",
                 e,
             )
         }
@@ -106,7 +106,7 @@ object SignatureExchange {
         }
         if (pack.format != SignaturePack.FORMAT && pack.format != SignaturePack.LEGACY_FORMAT) {
             throw IllegalArgumentException(
-                "Not a Fieldwatch signature pack (open a fieldwatch-signatures JSON file; spectre-signatures still imports).",
+                "Not a sw33p3r_ signature pack (open a fieldwatch-signatures JSON file; spectre-signatures still imports).",
             )
         }
         if (pack.fleets.isEmpty()) {
@@ -225,7 +225,7 @@ object SignatureExchange {
     }
 
     /**
-     * Replace stock rows from a GitHub / file pack. Keeps user mute ([Fleet.enabled]),
+     * Replace stock rows from a file pack. Keeps user mute ([Fleet.enabled]),
      * extra rules they added on a stock id, and every custom row. Does not touch
      * watchlist or Settings.
      */

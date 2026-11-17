@@ -13,7 +13,7 @@ object FieldwatchDisclaimer {
 
     const val LIABILITY =
         "You are solely responsible for how you use this app and for following local law. " +
-            "To the maximum extent permitted by law, Off Grid Pete LLC is not liable for " +
+            "To the maximum extent permitted by law, sw33p3r_ is not liable for " +
             "indirect, incidental, special, consequential, or punitive damages arising from its use."
 
     const val LOCATION =
@@ -30,7 +30,7 @@ object FieldwatchDisclaimer {
 
     /** Body of LICENSE in the repository, without the title line. */
     const val LICENSE_BODY =
-        "Copyright (c) 2026 Off Grid Pete LLC\n" +
+        "Copyright (c) 2026 sw33p3r_\n" +
             "\n" +
             "Permission is hereby granted, free of charge, to any person obtaining a copy " +
             "of this software and associated documentation files (the \"Software\"), to deal " +
@@ -80,7 +80,7 @@ object FieldwatchDisclaimer {
         appendLine(HYPOTHESES)
         appendLine(LIABILITY)
         appendLine(LOCATION)
-        appendLine("Do not use Fieldwatch, this paste, or your analysis in any situation where safety is in question.")
+        appendLine("Do not use sw33p3r_, this paste, or your analysis in any situation where safety is in question.")
         appendLine("Begin your reply with this disclaimer. Do not give safety advice.")
     }
 }

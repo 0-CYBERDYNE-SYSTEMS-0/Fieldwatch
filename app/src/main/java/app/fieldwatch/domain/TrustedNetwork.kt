@@ -533,7 +533,7 @@ object TrustedNets {
         lon = pin.lon,
         now = now,
         callsign = twinCallsign(pin.ssid),
-        remarks = "Fieldwatch · gone",
+        remarks = "sw33p3r_ · gone",
     )
 
     fun tombOf(pin: TwinPin): TwinTomb = TwinTomb(pin.uid, pin.lat, pin.lon, twinCallsign(pin.ssid))
@@ -544,7 +544,7 @@ object TrustedNets {
         lon = tomb.lon,
         now = now,
         callsign = tomb.callsign,
-        remarks = "Fieldwatch · gone",
+        remarks = "sw33p3r_ · gone",
     )
 
     private fun pinAt(

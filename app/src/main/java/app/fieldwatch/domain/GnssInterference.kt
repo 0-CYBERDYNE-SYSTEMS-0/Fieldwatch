@@ -315,7 +315,7 @@ object GnssCopy {
     const val INTRO =
         "If this was already happening when the check started, it can be missed."
     const val ROUTER =
-        "A Wi-Fi router or other electronics next to the phone can cause this. Fieldwatch cannot tell where it comes from or how far away it is."
+        "A Wi-Fi router or other electronics next to the phone can cause this. sw33p3r_ cannot tell where it comes from or how far away it is."
     const val SPOOF_LIMIT =
         "A careful fake GPS signal can get past these checks. A wrong position can also come from interference."
     const val MOCK =
@@ -441,11 +441,11 @@ object GnssCopy {
     private fun popupNote(kinds: Set<GnssKind>): String = when {
         GnssKind.MOCK in kinds && kinds.size == 1 -> ""
         GnssKind.SPOOFING in kinds && GnssKind.INTERFERENCE in kinds ->
-            "A router, a charger, or another phone against this one can do the same thing. A wrong position can come from that too. Fieldwatch cannot tell the source or how far away it is."
+            "A router, a charger, or another phone against this one can do the same thing. A wrong position can come from that too. sw33p3r_ cannot tell the source or how far away it is."
         GnssKind.SPOOFING in kinds ->
-            "A careful fake GPS signal can get past these checks. Fieldwatch cannot tell the source or how far away it is."
+            "A careful fake GPS signal can get past these checks. sw33p3r_ cannot tell the source or how far away it is."
         else ->
-            "A router, a charger, or another phone against this one can do the same thing. Fieldwatch cannot tell the source or how far away it is."
+            "A router, a charger, or another phone against this one can do the same thing. sw33p3r_ cannot tell the source or how far away it is."
     }
 
     fun phrase(kinds: Set<GnssKind>): String = when {

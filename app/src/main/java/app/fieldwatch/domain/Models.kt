@@ -1450,6 +1450,11 @@ data class AppSettings(
     val takEnabled: Boolean = false,
     val takHost: String = TakDefaults.HOST,
     val takPort: Int = TakDefaults.PORT,
+    /** Fieldwatch Station feed: every hear + this phone's fix as JSON to the station. Off by default. */
+    val stationEnabled: Boolean = false,
+    val stationUrl: String = app.fieldwatch.radio.StationDefaults.URL,
+    /** Blank = derived from the phone model ("Pixel 3" -> "pixel-3"). */
+    val stationSensorId: String = "",
     /** Extra attention signatures (body-cam, glasses, pentest, public-safety APs). */
     val takAttention: Boolean = true,
     /**

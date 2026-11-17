@@ -516,7 +516,7 @@ class SitTest {
             settings = AppSettings(tagLocation = false),
             operatorPath = emptyList(),
         )
-        assertEquals("FIELDWATCH FIELD DEBRIEF", doc.heading)
+        assertEquals("SW33P3R_ FIELD DEBRIEF", doc.heading)
         assertTrue(doc.windowLine.contains("last 15 minutes"))
     }
 
