@@ -74,10 +74,14 @@ object SettingsExchange {
         val pack = try {
             json.decodeFromString(SettingsPack.serializer(), trimmed)
         } catch (e: Exception) {
+            e.needsNewerApp()?.let { throw it }
             throw IllegalArgumentException(
                 "Not a sw33p3r_ settings pack. Export from Settings → Export settings.",
                 e,
             )
+        }
+        if (pack.formatVersion > SettingsPack.FORMAT_VERSION) {
+            throw CatalogNeedsNewerApp("formatVersion ${pack.formatVersion}")
         }
         if (pack.format == SignaturePack.FORMAT || pack.format == SignaturePack.LEGACY_FORMAT) {
             throw IllegalArgumentException(
@@ -95,7 +99,8 @@ object SettingsExchange {
     /**
      * Replace Settings, the current filter, presets, and watchlist.
      * Keep the catalog, logs, GPS, already-seen keys, the local disclaimer click-through,
-     * and whether this phone already showed the Live tour.
+     * whether this phone already showed the Live tour, the tour offer for this version,
+     * and this phone's TAK install tag.
      */
     fun apply(local: PersistedConfig, pack: SettingsPack): Pair<PersistedConfig, SettingsImportResult> {
         val next = local.copy(
@@ -103,9 +108,11 @@ object SettingsExchange {
                 disclaimerAccepted = local.settings.disclaimerAccepted,
                 disclaimerRev = local.settings.disclaimerRev,
                 liveTourDone = local.settings.liveTourDone,
+                liveTourRev = local.settings.liveTourRev,
                 darkTheme = true,
                 scanControlsExpanded = false,
-            ),
+                takCallsign = TakInstall.storedCallsign(pack.settings.takCallsign),
+            ).withOverlayBasemaps(),
             filter = pack.filter,
             presets = pack.presets,
             watchlist = pack.watchlist,

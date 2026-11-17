@@ -78,7 +78,8 @@ object AircraftTrail {
         val fixes = consolidate(rows.flatMap { it.fixes })
         val latest = rows.maxBy { it.lastSeen }
         val pilot = rows.filter { PayloadLocation.validCoord(it.pilotLat, it.pilotLon) }
-            .maxByOrNull { it.lastSeen }
+            .maxWithOrNull(compareBy<Source> { it.opAt ?: Long.MIN_VALUE }.thenBy { it.lastSeen })
+        val stamped = rows.maxWithOrNull(compareBy<Source> { it.fixAt ?: Long.MIN_VALUE }.thenBy { it.lastSeen })
         val pilotNear = pilot != null && fixes.any { fix ->
             Geo.meters(fix.lat, fix.lon, pilot.pilotLat!!, pilot.pilotLon!!) <= NEAR_M
         }
@@ -98,6 +99,7 @@ object AircraftTrail {
             speed = latest.speed,
             pilotLat = pilot?.pilotLat,
             pilotLon = pilot?.pilotLon,
+            opKind = pilot?.opKind,
             pilotOnMap = pilotNear,
             onWalk = near && fixes.isNotEmpty(),
             ownFigure = uasId.isNotBlank() && !near && fixes.isNotEmpty(),
@@ -105,6 +107,12 @@ object AircraftTrail {
             who = latest.title,
             mac = latest.mac,
             aircraft = aircraft,
+            fixAt = stamped?.fixAt,
+            phoneLat = stamped?.phoneLat,
+            phoneLon = stamped?.phoneLon,
+            opAt = pilot?.opAt,
+            opPhoneLat = pilot?.opPhoneLat,
+            opPhoneLon = pilot?.opPhoneLon,
         )
     }
 
@@ -136,9 +144,16 @@ object AircraftTrail {
             speed = last.speed ?: device.payloadSpeed,
             pilotLat = device.payloadOpLat,
             pilotLon = device.payloadOpLon,
+            opKind = device.payloadOpKind,
             key = device.key,
             mac = device.mac,
             aircraft = device.payloadAircraft?.trim().orEmpty(),
+            fixAt = device.payloadAt,
+            phoneLat = device.payloadPhoneLat,
+            phoneLon = device.payloadPhoneLon,
+            opAt = device.payloadOpAt,
+            opPhoneLat = device.payloadOpPhoneLat,
+            opPhoneLon = device.payloadOpPhoneLon,
         )
     }
 
@@ -152,6 +167,10 @@ object AircraftTrail {
                 if (pic.aircraft.isNotBlank()) appendLine("  ${pic.aircraft}")
                 val last = pic.fixes.last()
                 appendLine("  Last ${fmtCoord(last.lat, last.lon)}")
+                Mgrs.format(last.lat, last.lon)?.let { appendLine("  Grid $it") }
+                Geo.reportRange(pic.phoneLat, pic.phoneLon, last.lat, last.lon, pic.fixAt)?.let {
+                    appendLine("  $it")
+                }
                 val motion = listOfNotNull(
                     pic.alt?.let { "${fmtNum(it)} m" },
                     pic.heading?.let { "course ${fmtNum(it)}°" },
@@ -163,7 +182,11 @@ object AircraftTrail {
                 val shape = if (count == 1) "1 advertised fix" else "$count advertised fixes, ${fmtDist(length)}"
                 appendLine("  $shape")
                 if (pic.pilotLat != null && pic.pilotLon != null) {
-                    appendLine("  Pilot ${fmtCoord(pic.pilotLat, pic.pilotLon)}")
+                    appendLine("  ${OperatorLoc.label(pic.opKind)} ${fmtCoord(pic.pilotLat, pic.pilotLon)}")
+                    Mgrs.format(pic.pilotLat, pic.pilotLon)?.let { appendLine("  Grid $it") }
+                    Geo.reportRange(pic.opPhoneLat, pic.opPhoneLon, pic.pilotLat, pic.pilotLon, pic.opAt)?.let {
+                        appendLine("  $it")
+                    }
                 }
             }
             val hidden = (pictures.count { it.ownFigure } - MAX_OWN_FIGURES).coerceAtLeast(0)
@@ -209,7 +232,7 @@ object AircraftTrail {
 
     fun pilotMark(pic: Picture): SitPathPlot.Mark? {
         if (!pic.pilotOnMap || pic.pilotLat == null || pic.pilotLon == null) return null
-        return SitPathPlot.Mark(pic.pilotLat, pic.pilotLon, "Pilot")
+        return SitPathPlot.Mark(pic.pilotLat, pic.pilotLon, OperatorLoc.label(pic.opKind))
     }
 
     fun applyWalk(base: SitPathPlot.Figure?, pictures: List<Picture>, secondary: Boolean): SitPathPlot.Figure? {
@@ -226,15 +249,19 @@ object AircraftTrail {
             craftKeys = base.craftKeys + near.map { pathKeyLine(it) },
             spanM = Geo.spanM(framed),
             caption = if (secondary) {
-                if ("second sit’s advertised track" in base.caption) {
+                val line = LanguageText.text("report.craft.second")
+                if (line in base.caption || "second sit’s advertised track" in base.caption) {
                     base.caption
                 } else {
-                    base.caption + " A blue dotted line is the second sit’s advertised track within 2 km of this path."
+                    base.caption + " " + line
                 }
-            } else if ("black dotted line is an advertised track" in base.caption) {
-                base.caption
             } else {
-                base.caption + " A black dotted line is an advertised track within 2 km of this path."
+                val line = LanguageText.text("report.craft.near")
+                if (line in base.caption || "black dotted line is an advertised track" in base.caption) {
+                    base.caption
+                } else {
+                    base.caption + " " + line
+                }
             },
         )
     }
@@ -271,10 +298,8 @@ object AircraftTrail {
                 lengthM = maxOf(lenA, lenB),
                 spanM = Geo.spanM(samples),
                 caption = when {
-                    a != null && b != null ->
-                        "North-up. Black dots are this sit. Blue dots are the second sit. The marker is the last advertised position."
-                    b != null ->
-                        "North-up. The blue dotted line is the advertised track for ${b.title}. The marker is the last advertised position."
+                    a != null && b != null -> LanguageText.text("report.craft.compare")
+                    b != null -> LanguageText.text("report.craft.blue", mapOf("name" to b.title))
                     else -> aircraftCaption(a!!)
                 },
                 pilots = listOfNotNull(a?.let { pilotMark(it) }, b?.let { pilotMark(it) }),
@@ -331,7 +356,8 @@ object AircraftTrail {
         val tracks = fig.tracks.filter { it.aircraft }.ifEmpty { fig.tracks }
         val fixes = tracks.flatMap { it.samples }
         val frames = fixes + fig.pilots.map { GpsSample(0L, it.lat, it.lon, 0) }
-        val title = tracks.firstOrNull()?.name?.takeIf { it.isNotBlank() } ?: "Aircraft"
+        val title = tracks.firstOrNull()?.name?.takeIf { it.isNotBlank() }
+            ?: LanguageText.text("ui.aircraft.label")
         return SitPathPlot.Model(
             samples = emptyList(),
             dots = dots,
@@ -360,9 +386,9 @@ object AircraftTrail {
 
     private fun aircraftCaption(pic: Picture): String {
         return if (pic.fixes.size < 2) {
-            "Last advertised position for ${pic.title}. The marker is that position."
+            LanguageText.text("report.craft.last", mapOf("name" to pic.title))
         } else {
-            "North-up. The black dotted line is the advertised track for ${pic.title}. The marker is the last advertised position."
+            LanguageText.text("report.craft.black", mapOf("name" to pic.title))
         }
     }
 
@@ -382,6 +408,13 @@ object AircraftTrail {
         pilotLat: Double?,
         pilotLon: Double?,
         aircraft: String = "",
+        opKind: Int? = null,
+        fixAt: Long? = null,
+        phoneLat: Double? = null,
+        phoneLon: Double? = null,
+        opAt: Long? = null,
+        opPhoneLat: Double? = null,
+        opPhoneLon: Double? = null,
     ): String {
         val bits = ArrayList<String>()
         val craft = aircraft.trim()
@@ -391,11 +424,15 @@ object AircraftTrail {
         val id = uasId.trim()
         if (id.isNotEmpty() && !id.equals(label.trim(), ignoreCase = true)) bits += "UAS $id"
         bits += "last ${fmtCoord(lat, lon)}"
+        Mgrs.format(lat, lon)?.let { bits += "grid $it" }
+        Geo.reportRange(phoneLat, phoneLon, lat, lon, fixAt)?.let { bits += it }
         alt?.let { bits += "${fmtNum(it)} m" }
         heading?.let { bits += "course ${fmtNum(it)}°" }
         speed?.let { bits += "${fmtNum(it)} m/s" }
         if (PayloadLocation.validCoord(pilotLat, pilotLon)) {
-            bits += "pilot ${fmtCoord(pilotLat!!, pilotLon!!)}"
+            bits += "${OperatorLoc.label(opKind)} ${fmtCoord(pilotLat!!, pilotLon!!)}"
+            Mgrs.format(pilotLat, pilotLon)?.let { bits += "grid $it" }
+            Geo.reportRange(opPhoneLat, opPhoneLon, pilotLat, pilotLon, opAt)?.let { bits += it }
         }
         return bits.joinToString(" · ")
     }
@@ -422,6 +459,13 @@ object AircraftTrail {
             pilotLat = pic.pilotLat,
             pilotLon = pic.pilotLon,
             aircraft = pic.aircraft,
+            opKind = pic.opKind,
+            fixAt = pic.fixAt,
+            phoneLat = pic.phoneLat,
+            phoneLon = pic.phoneLon,
+            opAt = pic.opAt,
+            opPhoneLat = pic.opPhoneLat,
+            opPhoneLon = pic.opPhoneLon,
         )
         return "$head — $note"
     }
@@ -430,9 +474,24 @@ object AircraftTrail {
         val craft = if (pic.aircraft.isBlank()) "" else "${pic.aircraft}, "
         val status = if (pic.status.isBlank()) "" else "${pic.status}, "
         val last = pic.fixes.lastOrNull()
-        val where = if (last == null) "" else " last ${fmtCoord(last.lat, last.lon)}"
+        val where = if (last == null) {
+            ""
+        } else {
+            val grid = Mgrs.format(last.lat, last.lon)?.let { " grid $it" }.orEmpty()
+            val range = Geo.reportRange(pic.phoneLat, pic.phoneLon, last.lat, last.lon, pic.fixAt)
+                ?.let { " $it" }.orEmpty()
+            " last ${fmtCoord(last.lat, last.lon)}$grid$range"
+        }
         val count = if (pic.fixes.size == 1) "1 fix" else "${pic.fixes.size} fixes"
-        return "$craft$status$count$where".trim()
+        val pilot = if (!PayloadLocation.validCoord(pic.pilotLat, pic.pilotLon)) {
+            ""
+        } else {
+            val grid = Mgrs.format(pic.pilotLat!!, pic.pilotLon!!)?.let { " grid $it" }.orEmpty()
+            val range = Geo.reportRange(pic.opPhoneLat, pic.opPhoneLon, pic.pilotLat, pic.pilotLon, pic.opAt)
+                ?.let { " $it" }.orEmpty()
+            " ${OperatorLoc.label(pic.opKind)} ${fmtCoord(pic.pilotLat, pic.pilotLon)}$grid$range"
+        }
+        return "$craft$status$count$where$pilot".trim()
     }
 
     private fun cap(samples: List<PayloadFix>, limit: Int): List<PayloadFix> {
@@ -470,10 +529,17 @@ object AircraftTrail {
         val speed: Double?,
         val pilotLat: Double?,
         val pilotLon: Double?,
+        val opKind: Int? = null,
         /** Device key of the radio that sent these fixes. Empty for a report-only source. */
         val key: String = "",
         val mac: String = "",
         val aircraft: String = "",
+        val fixAt: Long? = null,
+        val phoneLat: Double? = null,
+        val phoneLon: Double? = null,
+        val opAt: Long? = null,
+        val opPhoneLat: Double? = null,
+        val opPhoneLon: Double? = null,
     )
 
     data class Picture(
@@ -486,6 +552,7 @@ object AircraftTrail {
         val speed: Double?,
         val pilotLat: Double?,
         val pilotLon: Double?,
+        val opKind: Int? = null,
         val pilotOnMap: Boolean,
         val onWalk: Boolean,
         val ownFigure: Boolean,
@@ -495,5 +562,11 @@ object AircraftTrail {
         val who: String = "",
         val mac: String = "",
         val aircraft: String = "",
+        val fixAt: Long? = null,
+        val phoneLat: Double? = null,
+        val phoneLon: Double? = null,
+        val opAt: Long? = null,
+        val opPhoneLat: Double? = null,
+        val opPhoneLon: Double? = null,
     )
 }

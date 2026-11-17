@@ -398,8 +398,28 @@ fun normalizeEnumKey(raw: String): String {
 
 /** Keep [Sighting.liveDecode] in step with the signature's live flags. Same instance when nothing changed. */
 fun Sighting.withLiveDecode(fleets: List<Fleet>): Sighting {
-    val chips = SignatureFieldDecoder.liveChips(this, fleets)
-    return if (chips == liveDecode) this else copy(liveDecode = chips)
+    val tag = SmartTag.read(this)
+    val chips = ArrayList<LiveDecodeChip>(4)
+    chips += SignatureFieldDecoder.liveChips(this, fleets)
+    val state = tag?.state
+    if (state != null) chips += LiveDecodeChip(state, emphasis = tag.separated)
+    val hk = facts.homekit
+    if (hk != null && !hk.paired) {
+        chips += LiveDecodeChip(
+            LanguageText.text("hk.chip", mapOf("category" to hk.categoryName)),
+            emphasis = true,
+        )
+    }
+    if (facts.matter?.commissionable == true) {
+        chips += LiveDecodeChip(LanguageText.text("matter.chip"), emphasis = true)
+    }
+    if (facts.sidewalk?.mode == SidewalkMode.REGISTRATION) {
+        chips += LiveDecodeChip(LanguageText.text("sw.chip"), emphasis = true)
+    }
+    facts.bthome?.chip()?.let { chips += it }
+    payloadAuth?.chipLabel()?.let { chips += LiveDecodeChip(it, emphasis = false) }
+    val id = SmartTag.separatedId(this)
+    return if (chips == liveDecode && id == smartTagId) this else copy(liveDecode = chips, smartTagId = id)
 }
 
 fun normalizeEnumLabels(map: Map<String, String>?): Map<String, String>? {

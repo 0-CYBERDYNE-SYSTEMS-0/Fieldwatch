@@ -1,5 +1,7 @@
 package app.fieldwatch.ui.screen
 
+import app.fieldwatch.domain.LanguageText
+
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -35,9 +37,12 @@ import androidx.compose.ui.unit.dp
 import app.fieldwatch.BuildConfig
 import app.fieldwatch.FieldwatchApp
 import app.fieldwatch.radio.WifiRadio
+import app.fieldwatch.domain.CellWatch
 import app.fieldwatch.domain.GnssCalibration
 import app.fieldwatch.domain.ScanPhoneFacts
 import app.fieldwatch.domain.ScanStatus
+import app.fieldwatch.domain.TakDiagFacts
+import app.fieldwatch.domain.TakPublish
 import app.fieldwatch.ui.FieldwatchUi
 import app.fieldwatch.ui.NestedTabInsets
 import app.fieldwatch.ui.NestedTopBar
@@ -61,6 +66,7 @@ fun ScanStatusScreen(
     }
     val app = context.applicationContext as FieldwatchApp
     val gnss by app.gnss.reading.collectAsStateWithLifecycle()
+    val cell by app.cells.reading.collectAsStateWithLifecycle()
     val gnssProfile by app.gnssProfile.profile.collectAsStateWithLifecycle()
     val report = ScanStatus.report(
         radio = state.scanRadio,
@@ -68,15 +74,17 @@ fun ScanStatusScreen(
         now = now,
         radiosOnAir = state.wifiNow + state.bleNow,
         gnssRows = gnss.diagRows + GnssCalibration.diagRows(gnssProfile),
+        tak = takDiag(state, app),
+        cellRows = CellWatch.diagRows(cell),
     )
     Scaffold(
         contentWindowInsets = NestedTabInsets,
         topBar = {
             NestedTopBar(
-                title = "Diagnostics",
+                title = LanguageText.text("ui.diagnostics.label"),
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, LanguageText.text("chrome.back"))
                     }
                 },
             )
@@ -91,15 +99,10 @@ fun ScanStatusScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(report.verdict, style = MaterialTheme.typography.bodyLarge)
-            Text("What to check", style = MaterialTheme.typography.titleSmall)
+            Text(LanguageText.text("ui.what.check"), style = MaterialTheme.typography.titleSmall)
             report.checks.forEach { line ->
                 Text(line, style = MaterialTheme.typography.bodyMedium)
             }
-            Text(
-                "If that does not explain it, tap Copy and send the paste.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             report.rows.forEach { (label, value) ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
@@ -118,25 +121,33 @@ fun ScanStatusScreen(
             FieldwatchActionButton(
                 onClick = {
                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("Fieldwatch diagnostics", report.text))
+                    clipboard.setPrimaryClip(ClipData.newPlainText(LanguageText.text("ui.fieldwatch.diagnostics"), report.text))
                     copied = true
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Copy") }
+            ) { Text(LanguageText.text("ui.copy.label")) }
             if (copied) {
                 Text(
-                    "Copied.",
+                    LanguageText.text("ui.copied.label"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            Text(
-                "Paste this into an issue. It has no network names, no addresses, and no GPS coordinates.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
+}
+
+internal fun takDiag(state: FieldwatchUi, app: FieldwatchApp): TakDiagFacts {
+    val settings = state.settings
+    val facts = app.tak.loopbackFacts()
+    return TakDiagFacts(
+        enabled = settings.takEnabled && !settings.demoMode,
+        preset = TakPublish.udpPreset(settings.takHost, settings.takPort),
+        port = settings.takPort,
+        open = facts.open,
+        birth = facts.birth,
+        lastSendOk = facts.lastSendOk,
+    )
 }
 
 internal fun scanPhoneFacts(context: Context, state: FieldwatchUi, now: Long): ScanPhoneFacts {
@@ -159,6 +170,7 @@ internal fun scanPhoneFacts(context: Context, state: FieldwatchUi, now: Long): S
         customNamesOnly = filter.customNamesOnly,
         showOnly = filter.namedOnly || filter.namedOnlyImplied(),
         movingWithYou = filter.movingWithYou,
+        seenAtPlaces = filter.seenAtPlaces,
         showWifi = filter.showWifi,
         showBle = filter.showBle,
         nameFilter = filter.nameQuery.isNotBlank(),

@@ -2,6 +2,7 @@ package app.fieldwatch.data
 
 import android.content.Context
 import app.fieldwatch.domain.CsvCells
+import app.fieldwatch.domain.LanguageText
 import app.fieldwatch.domain.Fleet
 import app.fieldwatch.domain.LogExportRadios
 import app.fieldwatch.domain.LogFormat
@@ -159,7 +160,7 @@ class LogStore(context: Context) {
             withContext(Dispatchers.IO) {
                 flushWriter()
                 val stream = resolver.openOutputStream(uri)
-                    ?: error("Could not open the selected location")
+                    ?: error(LanguageText.text("ui.could.not.open.location"))
                 stream.buffered(64 * 1024).use { dest ->
                     writeExport(dest, asJsonl, radios, onProgress)
                 }
@@ -284,8 +285,8 @@ class LogStore(context: Context) {
             device.mac,
             esc(device.name),
             device.rssi.toString(),
-            device.channel.toString(),
-            device.frequencyMhz.toString(),
+            LogReplay.csvChannel(device.kind, device.channel),
+            LogReplay.csvFreq(device.kind, device.frequencyMhz),
             device.oui,
             esc(device.vendor.orEmpty()),
             esc(names),
@@ -295,10 +296,11 @@ class LogStore(context: Context) {
                 if (device.randomized) append("RAND ")
                 if (device.hiddenSsid) append("HIDDEN ")
             }.trim(),
-            device.manufacturerDataHex.ifBlank { device.rawHex }.take(80),
+            LogReplay.advertisementField(device.rawHex, device.manufacturerDataHex),
             device.latitude?.let { String.format(Locale.US, "%.6f", it) }.orEmpty(),
             device.longitude?.let { String.format(Locale.US, "%.6f", it) }.orEmpty(),
             device.vendorIeOuis.take(8).joinToString("|") { MacUtil.normalize(it) },
+            LogReplay.manufacturerField(device.manufacturerDataHex),
         ).joinToString(",") + "\n"
     }
 
@@ -310,14 +312,15 @@ class LogStore(context: Context) {
             .put("mac", device.mac)
             .put("name", device.name)
             .put("rssi", device.rssi)
-            .put("channel", device.channel)
-            .put("freq", device.frequencyMhz)
+            .put("channel", LogReplay.channelField(device.kind, device.channel))
+            .put("freq", LogReplay.freqField(device.kind, device.frequencyMhz))
             .put("oui", device.oui)
             .put("vendor", device.vendor)
             .put("fleets", names)
             .put("mfg", device.manufacturerId)
             .put("uuids", device.serviceUuids.joinToString(","))
-            .put("raw", device.manufacturerDataHex.ifBlank { device.rawHex }.take(160))
+            .put("raw", LogReplay.advertisementField(device.rawHex, device.manufacturerDataHex))
+            .put("mfg_hex", LogReplay.manufacturerField(device.manufacturerDataHex))
             .put("vendor_ie", device.vendorIeOuis.take(8).joinToString("|") { MacUtil.normalize(it) })
             .put("rand", device.randomized)
             .put("hidden", device.hiddenSsid)
@@ -328,7 +331,7 @@ class LogStore(context: Context) {
 
     companion object {
         private const val CSV_HEADER =
-            "timestamp,iso,kind,mac,name,rssi,channel,freq,oui,vendor,fleets,mfg,uuids,flags,raw,lat,lon,vendor_ie\n"
+            "timestamp,iso,kind,mac,name,rssi,channel,freq,oui,vendor,fleets,mfg,uuids,flags,raw,lat,lon,vendor_ie,mfg_hex\n"
 
         private fun skipCsvHeader(input: java.io.BufferedInputStream) {
             input.mark(512)

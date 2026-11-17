@@ -77,7 +77,7 @@ class ScanStatusTest {
         val report = ScanStatus.report(radio(), phone(locationPermission = false), now)
         assertEquals("Location permission is off.", report.verdict)
         assertTrue(report.blocked)
-        assertTrue(report.checks.any { it.startsWith("Allow location for Fieldwatch.") })
+        assertTrue(report.checks.any { it.startsWith("Allow location for sw33p3r_.") })
     }
 
     @Test
@@ -92,7 +92,7 @@ class ScanStatusTest {
             report.verdict,
         )
         assertTrue(report.blocked)
-        assertEquals("waiting on OS (12s ago)", report.rows.first { it.first == "Last Wi-Fi scan" }.second)
+        assertEquals("waiting on Android (12s ago)", report.rows.first { it.first == "Last Wi-Fi scan" }.second)
         assertEquals("parked", report.rows.first { it.first == "BLE" }.second)
         assertEquals("0", report.rows.first { it.first == "BLE results last minute" }.second)
         assertTrue(report.checks.any { it.contains("The Wi-Fi radio is on.") })
@@ -240,11 +240,57 @@ class ScanStatusTest {
                 "Wi-Fi", "Last Wi-Fi scan", "Bluetooth", "BLE", "BLE results last minute",
                 "Faster Wi-Fi AP scans", "Allow background usage", "Unrestricted battery",
                 "Location", "Location permission", "GPS fix", "Filters",
+                "TAK / CoT", "Same phone", "Socket opened while", "Last send",
             ),
             labels,
         )
+        assertEquals("off", report.rows.first { it.first == "TAK / CoT" }.second)
+        assertEquals("not open", report.rows.first { it.first == "Same phone" }.second)
+        assertEquals("not open", report.rows.first { it.first == "Socket opened while" }.second)
+        assertEquals("no send yet", report.rows.first { it.first == "Last send" }.second)
         assertEquals("samsung SM-A546U1", report.rows.first { it.first == "Phone" }.second)
         assertEquals("16 (API 36)", report.rows.first { it.first == "Android" }.second)
+    }
+
+    @Test
+    fun takRowsNameThePresetAndHideTheHost() {
+        val hidden = "192.168.0.9"
+        val report = ScanStatus.report(
+            radio(),
+            phone(),
+            now,
+            tak = TakDiagFacts(
+                enabled = true,
+                preset = TakUdpPreset.CUSTOM,
+                port = 10011,
+                open = true,
+                birth = TakBirth.CELLULAR,
+                lastSendOk = false,
+            ),
+        )
+        assertEquals("on · Other host, port 10011", report.rows.first { it.first == "TAK / CoT" }.second)
+        assertEquals("needs Wi-Fi", report.rows.first { it.first == "Same phone" }.second)
+        assertEquals("cellular only", report.rows.first { it.first == "Socket opened while" }.second)
+        assertEquals("send failed", report.rows.first { it.first == "Last send" }.second)
+        assertFalse(report.text.contains(hidden))
+        val phone = ScanStatus.report(
+            radio(),
+            phone(),
+            now,
+            tak = TakDiagFacts(
+                enabled = true,
+                preset = TakUdpPreset.THIS_PHONE,
+                port = 10011,
+                open = true,
+                birth = TakBirth.WIFI,
+                lastSendOk = true,
+            ),
+        )
+        assertEquals("on · This phone, port 10011", phone.rows.first { it.first == "TAK / CoT" }.second)
+        assertEquals("reaches ATAK", phone.rows.first { it.first == "Same phone" }.second)
+        assertEquals("Wi-Fi connected", phone.rows.first { it.first == "Socket opened while" }.second)
+        assertEquals("succeeded", phone.rows.first { it.first == "Last send" }.second)
+        assertFalse(phone.text.contains(hidden))
     }
 
     @Test
@@ -254,7 +300,7 @@ class ScanStatusTest {
             phone(),
             now,
         )
-        assertEquals("waiting on OS", report.rows.first { it.first == "Last Wi-Fi scan" }.second)
+        assertEquals("waiting on Android", report.rows.first { it.first == "Last Wi-Fi scan" }.second)
         assertTrue(report.blocked)
     }
 

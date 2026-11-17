@@ -4,14 +4,54 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.descriptors.PrimitiveKind
 import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
 
-@Serializable
+/**
+ * A signature pack, or a settings pack, named a value this app does not know.
+ * The file is not applied. The screen asks for an app update first.
+ */
+class CatalogNeedsNewerApp(val token: String) : SerializationException(token)
+
+internal fun Throwable.needsNewerApp(): CatalogNeedsNewerApp? {
+    var current: Throwable? = this
+    val seen = HashSet<Throwable>()
+    while (current != null && seen.add(current)) {
+        if (current is CatalogNeedsNewerApp) return current
+        val message = current.message.orEmpty()
+        val marker = "does not contain element with name '"
+        val at = message.indexOf(marker)
+        if (at >= 0) {
+            val start = at + marker.length
+            val end = message.indexOf('\'', start)
+            val token = if (end > start) message.substring(start, end) else message
+            return CatalogNeedsNewerApp(token)
+        }
+        current = current.cause
+    }
+    return null
+}
+
+@Serializable(with = RadioKindSerializer::class)
 enum class RadioKind { WIFI, BLE }
+
+internal object RadioKindSerializer : KSerializer<RadioKind> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("RadioKind", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: RadioKind) {
+        encoder.encodeString(value.name)
+    }
+
+    override fun deserialize(decoder: Decoder): RadioKind {
+        val raw = decoder.decodeString()
+        return RadioKind.entries.firstOrNull { it.name == raw } ?: throw CatalogNeedsNewerApp(raw)
+    }
+}
 
 @Serializable
 enum class ViewMode {
@@ -19,12 +59,18 @@ enum class ViewMode {
     ;
 
     fun label(): String = when (this) {
-        RADAR -> "Classic radar"
-        LIST -> "Strength list"
-        TIMELINE -> "Timeline"
-        HYBRID -> "Hybrid + sparklines"
-        BY_CLASS -> "By class"
+        RADAR -> LanguageText.text("view.radar")
+        LIST -> LanguageText.text("view.list")
+        TIMELINE -> LanguageText.text("view.timeline")
+        HYBRID -> LanguageText.text("view.hybrid")
+        BY_CLASS -> LanguageText.text("view.by.class")
     }
+
+    /** Title, subtitle, frequency, first/last, and the live path are list fields. Radar has none of them. */
+    fun usesListFields(): Boolean = this != RADAR
+
+    /** Strength bar on Strength list, Hybrid, and By class. Radar and Timeline show strength another way. */
+    fun usesRssiBars(): Boolean = this == LIST || this == HYBRID || this == BY_CLASS
 }
 
 @Serializable
@@ -37,7 +83,7 @@ enum class LogFormat { CSV, JSON }
 enum class FilterLogic { AND, OR }
 
 /** Live filter / Signatures bulk on-off. Independent of [Fleet.colorIndex]. */
-@Serializable
+@Serializable(with = SignatureClassSerializer::class)
 enum class SignatureClass {
     FINDER,
     BEACON,
@@ -58,57 +104,63 @@ enum class SignatureClass {
     HOME,
     ISP,
     MESH,
+    TWO_WAY,
+    MILITARY,
     PHONE,
     OTHER,
     ;
 
     fun label(): String = when (this) {
-        FINDER -> "Finder tags"
-        BEACON -> "Retail beacons"
-        SIGNAGE -> "Signage"
-        WEARABLE -> "Wearables"
-        SURVEILLANCE -> "Surveillance"
-        DRONE -> "Drones"
-        HACKING -> "Pentest"
-        BODYWORN -> "Body-worn"
-        LAW_ENFORCEMENT -> "Public safety"
-        VEHICLE -> "Vehicle"
-        GLASSES -> "Glasses"
-        AUDIO -> "Audio"
-        CAMERA -> "Cameras"
-        THERMOSTAT -> "Thermostats"
-        LOCK -> "Access control"
-        HEALTH -> "Health"
-        HOME -> "Home IoT"
-        ISP -> "ISP / routers"
-        MESH -> "Mesh"
-        PHONE -> "Phones / PCs"
-        OTHER -> "Other"
+        FINDER -> LanguageText.text("class.finder")
+        BEACON -> LanguageText.text("class.beacon")
+        SIGNAGE -> LanguageText.text("class.signage")
+        WEARABLE -> LanguageText.text("class.wearable")
+        SURVEILLANCE -> LanguageText.text("class.surveillance")
+        DRONE -> LanguageText.text("class.drone")
+        HACKING -> LanguageText.text("class.hacking")
+        BODYWORN -> LanguageText.text("class.bodyworn")
+        LAW_ENFORCEMENT -> LanguageText.text("class.law")
+        VEHICLE -> LanguageText.text("class.vehicle")
+        GLASSES -> LanguageText.text("class.glasses")
+        AUDIO -> LanguageText.text("class.audio")
+        CAMERA -> LanguageText.text("class.camera")
+        THERMOSTAT -> LanguageText.text("class.thermostat")
+        LOCK -> LanguageText.text("class.lock")
+        HEALTH -> LanguageText.text("class.health")
+        HOME -> LanguageText.text("class.home")
+        ISP -> LanguageText.text("class.isp")
+        MESH -> LanguageText.text("class.mesh")
+        TWO_WAY -> LanguageText.text("class.twoway")
+        MILITARY -> LanguageText.text("class.military")
+        PHONE -> LanguageText.text("class.phone")
+        OTHER -> LanguageText.text("class.other")
     }
 
-    /** Short spoken form for watchlist voice. */
+    /** Short spoken form for watchlist voice. Uses the control slot, not the chip cap. */
     fun speechLabel(): String = when (this) {
-        FINDER -> "finder tags"
-        BEACON -> "retail beacons"
-        SIGNAGE -> "signage"
-        WEARABLE -> "wearables"
-        SURVEILLANCE -> "surveillance"
-        DRONE -> "drones"
-        HACKING -> "pentest"
-        BODYWORN -> "body worn"
-        LAW_ENFORCEMENT -> "public safety"
-        VEHICLE -> "vehicle"
-        GLASSES -> "glasses"
-        AUDIO -> "audio"
-        CAMERA -> "cameras"
-        THERMOSTAT -> "thermostats"
-        LOCK -> "access control"
-        HEALTH -> "health"
-        HOME -> "home I O T"
-        ISP -> "I S P routers"
-        MESH -> "mesh"
-        PHONE -> "phones"
-        OTHER -> "other"
+        FINDER -> LanguageText.text("speech.finder")
+        BEACON -> LanguageText.text("speech.beacon")
+        SIGNAGE -> LanguageText.text("speech.signage")
+        WEARABLE -> LanguageText.text("speech.wearable")
+        SURVEILLANCE -> LanguageText.text("speech.surveillance")
+        DRONE -> LanguageText.text("speech.drone")
+        HACKING -> LanguageText.text("speech.hacking")
+        BODYWORN -> LanguageText.text("speech.bodyworn")
+        LAW_ENFORCEMENT -> LanguageText.text("speech.law")
+        VEHICLE -> LanguageText.text("speech.vehicle")
+        GLASSES -> LanguageText.text("speech.glasses")
+        AUDIO -> LanguageText.text("speech.audio")
+        CAMERA -> LanguageText.text("speech.camera")
+        THERMOSTAT -> LanguageText.text("speech.thermostat")
+        LOCK -> LanguageText.text("speech.lock")
+        HEALTH -> LanguageText.text("speech.health")
+        HOME -> LanguageText.text("speech.home")
+        ISP -> LanguageText.text("speech.isp")
+        MESH -> LanguageText.text("speech.mesh")
+        TWO_WAY -> LanguageText.text("speech.twoway")
+        MILITARY -> LanguageText.text("speech.military")
+        PHONE -> LanguageText.text("speech.phone")
+        OTHER -> LanguageText.text("speech.other")
     }
 
     /**
@@ -124,6 +176,20 @@ enum class SignatureClass {
     }
 }
 
+internal object SignatureClassSerializer : KSerializer<SignatureClass> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("SignatureClass", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: SignatureClass) {
+        encoder.encodeString(value.name)
+    }
+
+    override fun deserialize(decoder: Decoder): SignatureClass {
+        val raw = decoder.decodeString()
+        return SignatureClass.entries.firstOrNull { it.name == raw } ?: throw CatalogNeedsNewerApp(raw)
+    }
+}
+
 /** What watchlist voice says. Class is the Live glyph bucket; signature is the catalog row. */
 @Serializable
 enum class AlertVoiceWhat {
@@ -133,9 +199,9 @@ enum class AlertVoiceWhat {
     ;
 
     fun label(): String = when (this) {
-        CLASS -> "Class"
-        SIGNATURE -> "Signature"
-        BOTH -> "Class + signature"
+        CLASS -> LanguageText.text("voice.class")
+        SIGNATURE -> LanguageText.text("voice.signature")
+        BOTH -> LanguageText.text("voice.both")
     }
 }
 
@@ -159,9 +225,16 @@ fun spokenWatchPhrase(
     fleets: List<Fleet>,
     what: AlertVoiceWhat,
     target: WatchTarget? = null,
+    spokenNames: List<SpokenName> = emptyList(),
+    watchlist: List<WatchTarget> = emptyList(),
 ): String {
-    if (target?.deviceKey != null) {
-        val named = target.label.trim().takeIf {
+    val individual = watchlist.firstOrNull { row ->
+        row.deviceKey == device.key &&
+            row.label.trim().isNotEmpty() &&
+            !row.label.trim().equals(device.mac, ignoreCase = true)
+    } ?: target?.takeIf { it.deviceKey != null }
+    if (individual?.deviceKey != null) {
+        val named = individual.label.trim().takeIf {
             it.isNotEmpty() && !it.equals(device.mac, ignoreCase = true)
         } ?: device.listTitle().takeIf {
             it.isNotBlank() && !it.equals(device.mac, ignoreCase = true)
@@ -172,7 +245,11 @@ fun spokenWatchPhrase(
     val id = preferred ?: device.fleetIds.firstOrNull() ?: return "unmatched"
     val fleet = fleets.firstOrNull { it.id == id } ?: return "unmatched"
     val cls = fleet.kind.speechLabel()
-    val sig = fleet.speechName()
+    val sig = if (what == AlertVoiceWhat.CLASS) {
+        fleet.speechName()
+    } else {
+        SpokenNames.words(spokenNames, id, device.name, device.mac) ?: fleet.speechName()
+    }
     return when (what) {
         AlertVoiceWhat.CLASS -> cls
         AlertVoiceWhat.SIGNATURE -> sig
@@ -193,8 +270,8 @@ enum class SignatureListSort {
     ;
 
     fun label(): String = when (this) {
-        NAME -> "Name A–Z"
-        CLASS -> "Class A–Z"
+        NAME -> LanguageText.text("sort.name")
+        CLASS -> LanguageText.text("sort.class")
     }
 }
 
@@ -215,7 +292,7 @@ enum class ListLine {
 
 enum class RssiTrend { UP_FAST, UP, FLAT, DOWN, DOWN_FAST, UNKNOWN }
 
-@Serializable
+@Serializable(with = RuleKindSerializer::class)
 enum class RuleKind {
     OUI,
     MAC_PREFIX,
@@ -228,6 +305,20 @@ enum class RuleKind {
     RADIO_KIND,
     HIDDEN_SSID,
     VENDOR_IE_OUI,
+}
+
+internal object RuleKindSerializer : KSerializer<RuleKind> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("RuleKind", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: RuleKind) {
+        encoder.encodeString(value.name)
+    }
+
+    override fun deserialize(decoder: Decoder): RuleKind {
+        val raw = decoder.decodeString()
+        return RuleKind.entries.firstOrNull { it.name == raw } ?: throw CatalogNeedsNewerApp(raw)
+    }
 }
 
 @Serializable
@@ -427,11 +518,16 @@ fun List<Fleet>.sortedForCatalog(sort: SignatureListSort): List<Fleet> = when (s
     )
 }
 
-fun List<Fleet>.groupedByClass(): List<Pair<SignatureClass, List<Fleet>>> =
-    groupBy { it.kind }
-        .toList()
-        .sortedBy { it.first.label().lowercase() }
-        .map { (kind, rows) -> kind to rows.sortedBy { it.name.lowercase() } }
+/**
+ * Signatures → Class A–Z. Every visible class is present, including one with
+ * no signatures. Body-worn folds into Wearables.
+ */
+fun List<Fleet>.groupedByClass(): List<Pair<SignatureClass, List<Fleet>>> {
+    val byKind = groupBy { it.kind.folded() }
+    return SignatureClass.visible
+        .sortedBy { it.label().lowercase() }
+        .map { kind -> kind to byKind[kind].orEmpty().sortedBy { it.name.lowercase() } }
+}
 
 /** Signature name + Extra attention text for every matched signature on this radio that has one. */
 fun Sighting.attentionNotes(fleets: List<Fleet>): List<Pair<String, String>> {
@@ -475,6 +571,8 @@ data class FilterState(
     val ouiQuery: String = "",
     val logic: FilterLogic = FilterLogic.AND,
     val movingWithYou: Boolean = false,
+    /** Live include: stable radios already heard at two or more places. */
+    val seenAtPlaces: Boolean = false,
     /** Hide already-seen radios; Mark seen / Reset seen live with this switch. */
     val arrivalsOnly: Boolean = false,
     /**
@@ -482,12 +580,18 @@ data class FilterState(
      * dual-chip radios stay. Hide selected Fast Pair still drops pairing-mode too.
      */
     val hideFastPairAccountKey: Boolean = false,
-    /** Include or hide Live rows by [Fleet.kind]. Independent of signature matching on/off. */
+    /** Include or hide Live rows by [Fleet.kind]. Off keeps [classes] and [excludeClasses]. */
     val useClassFilter: Boolean = false,
     val excludeClasses: Boolean = false,
     val classes: Set<SignatureClass> = emptySet(),
     /** Live hide: radios marked Mine. The sit and Debrief still include them. */
     val hideMine: Boolean = false,
+    /**
+     * Live hide: Bluetooth rows whose address can change.
+     * That is the local bit, or an address Android calls random.
+     * Wi-Fi stays. The sit still keeps them.
+     */
+    val hideRandomizedBle: Boolean = false,
 ) {
     /** Show only is narrowing Live to at least one picked class. Empty Show only does not hide unmatched. */
     fun classIncludeActive(): Boolean =
@@ -497,6 +601,104 @@ data class FilterState(
         includeSignatures && includeFleetIds.isNotEmpty()
 
     fun namedOnlyImplied(): Boolean = classIncludeActive() || signatureIncludeActive()
+
+    /** Keep or hide row. On when any of its switches is on. */
+    fun whoStaysOn(): Boolean =
+        namedOnly || customNamesOnly || watchedOnly || hideMine ||
+            hideFastPairAccountKey || hideRandomizedBle
+
+    /**
+     * Selected signatures is one list.
+     * Show only is [includeSignatures]. Hide these is [excludeSignatures] while show is off.
+     * An old save with both lists on counts as Show only.
+     */
+    fun signatureShowOn(): Boolean = includeSignatures
+
+    fun signatureHideOn(): Boolean = excludeSignatures && !includeSignatures
+
+    /** Selected signatures row. On when Show only or Hide these is on. */
+    fun signaturesOn(): Boolean = signatureShowOn() || signatureHideOn()
+
+    /** The one pick list. Show wins when an old save had two different lists. */
+    fun selectedSignatureIds(): Set<String> = when {
+        includeSignatures -> includeFleetIds
+        excludeSignatures -> fleetIds
+        includeFleetIds.isNotEmpty() -> includeFleetIds
+        else -> fleetIds
+    }
+
+    /** Show only chip. Tap again to turn the mode off. Picks stay. */
+    fun toggleSignatureShow(): FilterState {
+        val ids = selectedSignatureIds()
+        val on = !signatureShowOn()
+        return copy(
+            includeSignatures = on,
+            excludeSignatures = false,
+            includeFleetIds = ids,
+            fleetIds = ids,
+        )
+    }
+
+    /** Hide these chip. Tap again to turn the mode off. Picks stay. */
+    fun toggleSignatureHide(): FilterState {
+        val ids = selectedSignatureIds()
+        val on = !signatureHideOn()
+        return copy(
+            includeSignatures = false,
+            excludeSignatures = on,
+            includeFleetIds = ids,
+            fleetIds = ids,
+        )
+    }
+
+    /** One signature row. Adding a pick while the mode is off turns Show only on. */
+    fun toggleSignaturePick(id: String, checked: Boolean): FilterState {
+        val ids = selectedSignatureIds().toMutableSet().apply {
+            if (checked) add(id) else remove(id)
+        }
+        val show = signatureShowOn()
+        val hide = signatureHideOn()
+        val turnShowOn = checked && !show && !hide
+        return copy(
+            includeFleetIds = ids,
+            fleetIds = ids,
+            includeSignatures = show || turnShowOn,
+            excludeSignatures = if (turnShowOn) false else hide,
+        )
+    }
+
+    /** Signal, name, MAC, vendor row. On when RSSI, name, vendor, or OR is set. */
+    fun fineOn(): Boolean =
+        rssiMin > -100 || nameQuery.isNotBlank() || ouiQuery.isNotBlank() || logic == FilterLogic.OR
+
+    fun clearWhoStays(): FilterState = copy(
+        namedOnly = false,
+        customNamesOnly = false,
+        watchedOnly = false,
+        hideMine = false,
+        hideFastPairAccountKey = false,
+        hideRandomizedBle = false,
+    )
+
+    fun clearClasses(): FilterState = copy(
+        useClassFilter = false,
+        excludeClasses = false,
+        classes = emptySet(),
+    )
+
+    fun clearSelectedSignatures(): FilterState = copy(
+        includeSignatures = false,
+        excludeSignatures = false,
+        includeFleetIds = emptySet(),
+        fleetIds = emptySet(),
+    )
+
+    fun clearFine(): FilterState = copy(
+        rssiMin = -100,
+        nameQuery = "",
+        ouiQuery = "",
+        logic = FilterLogic.AND,
+    )
 }
 
 @Serializable
@@ -550,6 +752,575 @@ data class WatchTarget(
     val mine: Boolean = false,
 )
 
+/**
+ * Raster under Show live path, Reports → Path, and the path figure.
+ * Missing JSON is [OSM]. Online place names and maps is the on/off.
+ * OpenStreetMap, the USGS maps, and FAA VFR Sectional need no key.
+ * The others take a key the user keeps on this phone. That key is not part of this setting.
+ */
+@Serializable
+enum class MapBasemap {
+    OSM,
+    USGS_IMAGERY,
+    USGS_TOPO,
+    USGS_IMAGERY_TOPO,
+    USGS_SHADED_RELIEF,
+    USGS_HYDRO,
+    FAA_VFR_SECTIONAL,
+    ESRI_SATELLITE,
+    ESRI_STREETS,
+    ESRI_OUTDOOR,
+    MAPTILER_SATELLITE,
+    MAPTILER_STREETS,
+    MAPTILER_OUTDOOR,
+    STADIA_SATELLITE,
+    STADIA_STREETS,
+    STADIA_TERRAIN,
+    THUNDERFOREST_STREETS,
+    THUNDERFOREST_OUTDOORS,
+    THUNDERFOREST_TRANSPORT,
+    ;
+
+    private data class Spec(
+        val labelKey: String,
+        val cacheName: String,
+        val maxZoom: Int,
+        val service: MapKeyService?,
+        val host: String,
+        val keyQuery: String?,
+        val url: (Int, Int, Int) -> String,
+        val credit: String,
+        val creditPrint: String,
+        val creditUrl: String?,
+        val redirectRoots: List<String>,
+        val minZoom: Int = 0,
+        val usOnly: Boolean = false,
+        val cautionKey: String? = null,
+    )
+
+    private val spec: Spec
+        get() = when (this) {
+            OSM -> Spec(
+                labelKey = "map.openstreetmap",
+                cacheName = "osm",
+                maxZoom = 19,
+                service = null,
+                host = "tile.openstreetmap.org",
+                keyQuery = null,
+                url = { z, x, y -> "https://tile.openstreetmap.org/$z/$x/$y.png" },
+                credit = "© OpenStreetMap contributors",
+                creditPrint = "© OpenStreetMap contributors · openstreetmap.org/copyright",
+                creditUrl = "https://www.openstreetmap.org/copyright",
+                redirectRoots = listOf("openstreetmap.org"),
+            )
+            USGS_IMAGERY -> usgs(
+                "map.usgs.imagery",
+                "usgs-imagery",
+                "USGSImageryOnly",
+            )
+            USGS_TOPO -> usgs(
+                "map.usgs.topo",
+                "usgs-topo",
+                "USGSTopo",
+            )
+            USGS_IMAGERY_TOPO -> usgs(
+                "map.usgs.imagerytopo",
+                "usgs-imagerytopo",
+                "USGSImageryTopo",
+            )
+            USGS_SHADED_RELIEF -> usgs(
+                "map.usgs.relief",
+                "usgs-relief",
+                "USGSShadedReliefOnly",
+                "U.S. Geological Survey (3DEP)",
+            )
+            USGS_HYDRO -> usgs(
+                "map.usgs.hydro",
+                "usgs-hydro",
+                "USGSHydroCached",
+                "U.S. Geological Survey (NHD)",
+            )
+            FAA_VFR_SECTIONAL -> Spec(
+                labelKey = "map.faa.vfr",
+                cacheName = "faa-vfr",
+                maxZoom = 12,
+                service = null,
+                host = "tiles.arcgis.com",
+                keyQuery = null,
+                url = { z, x, y ->
+                    "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/" +
+                        "VFR_Sectional/MapServer/tile/$z/$y/$x"
+                },
+                credit = "Federal Aviation Administration",
+                creditPrint = "Federal Aviation Administration. Not for navigation. Charts update every 56 days.",
+                creditUrl = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/vfr/",
+                redirectRoots = listOf("arcgis.com"),
+                minZoom = 8,
+                usOnly = true,
+                cautionKey = "map.faa.not.for.navigation",
+            )
+            ESRI_SATELLITE -> esri(
+                "map.esri.satellite",
+                "esri-satellite",
+                "imagery-labels",
+                "© Esri, Maxar, Earthstar Geographics",
+            )
+            ESRI_STREETS -> esri(
+                "map.esri.streets",
+                "esri-streets",
+                "streets",
+                "© Esri, TomTom, Garmin, OSM",
+            )
+            ESRI_OUTDOOR -> esri(
+                "map.esri.outdoor",
+                "esri-outdoor",
+                "outdoor",
+                "© Esri, TomTom, Garmin, OSM",
+            )
+            MAPTILER_SATELLITE -> maptiler(
+                "map.maptiler.satellite",
+                "maptiler-satellite",
+                "satellite-v4",
+                "jpg",
+                "© MapTiler",
+            )
+            MAPTILER_STREETS -> maptiler(
+                "map.maptiler.streets",
+                "maptiler-streets",
+                "streets-v4",
+                "png",
+                "© MapTiler © OpenStreetMap",
+            )
+            MAPTILER_OUTDOOR -> maptiler(
+                "map.maptiler.outdoor",
+                "maptiler-outdoor",
+                "outdoor-v4",
+                "png",
+                "© MapTiler © OpenStreetMap",
+            )
+            STADIA_SATELLITE -> stadia(
+                "map.stadia.satellite",
+                "stadia-satellite",
+                "alidade_satellite",
+                "jpg",
+                20,
+                "© Stadia Maps, CNES, Airbus DS, OSM",
+            )
+            STADIA_STREETS -> stadia(
+                "map.stadia.streets",
+                "stadia-streets",
+                "alidade_smooth",
+                "png",
+                20,
+                "© Stadia Maps © OpenMapTiles © OSM",
+            )
+            STADIA_TERRAIN -> stadia(
+                "map.stadia.terrain",
+                "stadia-terrain",
+                "stamen_terrain",
+                "png",
+                18,
+                "© Stadia Maps © Stamen Design © OSM",
+            )
+            THUNDERFOREST_STREETS -> thunderforest(
+                "map.thunderforest.streets",
+                "thunderforest-streets",
+                "atlas",
+            )
+            THUNDERFOREST_OUTDOORS -> thunderforest(
+                "map.thunderforest.outdoors",
+                "thunderforest-outdoors",
+                "outdoors",
+            )
+            THUNDERFOREST_TRANSPORT -> thunderforest(
+                "map.thunderforest.transport",
+                "thunderforest-transport",
+                "transport",
+            )
+        }
+
+    val labelKey: String get() = spec.labelKey
+
+    /** One directory per style so a switch does not reuse another map's pictures. */
+    val cacheName: String get() = spec.cacheName
+
+    /** Highest zoom this service actually serves. Screen and print stay at or under it. */
+    val maxZoom: Int get() = spec.maxZoom
+
+    /** Lowest zoom this service serves. A coarser view asks the user to zoom in. */
+    val minZoom: Int get() = spec.minZoom
+
+    /** United States coverage. The picker says so. The list itself does not hide the row. */
+    val usOnly: Boolean get() = spec.usOnly
+
+    /** Extra corner phrase, localized. Null on every map except FAA VFR Sectional. */
+    val cautionKey: String? get() = spec.cautionKey
+
+    /** Second line in the Map list. Empty on a world map. */
+    val subtitleKeys: List<String>
+        get() = buildList {
+            if (usOnly) add("map.united.states")
+            cautionKey?.let { add(it) }
+        }
+
+    /** Null on OpenStreetMap, the USGS maps, and FAA VFR Sectional. One saved key covers every style of a service. */
+    val service: MapKeyService? get() = spec.service
+
+    val needsKey: Boolean get() = spec.service != null
+
+    val host: String get() = spec.host
+
+    /** Query name for the key. Null when [needsKey] is false. */
+    val keyQuery: String? get() = spec.keyQuery
+
+    /** Hosts a tile redirect may use. The key is not forwarded. */
+    val redirectRoots: List<String> get() = spec.redirectRoots
+
+    /** Picture address with no key. Slippy x/y. USGS and Esri serve z/y/x. */
+    fun tileUrl(z: Int, x: Int, y: Int): String = spec.url(z, x, y)
+
+    internal fun fixedTileUrl(z: Int, x: Int, y: Int): String = tileUrl(z, x, y)
+
+    /** Corner line on the phone. The OpenStreetMap phrase stays this English. */
+    val credit: String get() = spec.credit
+
+    /**
+     * Corner line with the localized FAA caution appended, then any overlay credits.
+     * Other maps ignore [localizedCaution] and keep [credit].
+     */
+    fun screenCredit(
+        localizedCaution: String?,
+        overlays: Collection<MapOverlay> = emptyList(),
+    ): String = screenCreditLines(localizedCaution, overlays).joinToString(" · ")
+
+    /**
+     * One line for the map, then one line for each overlay.
+     * An empty overlay list is the map line alone.
+     */
+    fun screenCreditLines(
+        localizedCaution: String?,
+        overlays: Collection<MapOverlay> = emptyList(),
+    ): List<String> {
+        val base = if (cautionKey == null) {
+            credit
+        } else {
+            val phrase = localizedCaution?.trim().orEmpty()
+            if (phrase.isEmpty()) credit else "$credit. $phrase"
+        }
+        val extras = MapOverlay.ordered(overlays).map { it.basemap.credit }
+        return if (extras.isEmpty()) listOf(base) else listOf(base) + extras
+    }
+
+    /** Screen lines, with the sensor-list credit on the map line when that layer is on. */
+    fun shownCreditLines(
+        localizedCaution: String?,
+        overlays: Collection<MapOverlay>,
+        includeSensorCredit: Boolean,
+    ): List<String> {
+        val parts = screenCreditLines(localizedCaution, overlays)
+        return listOf(FlockCredit.append(parts.first(), includeSensorCredit)) + parts.drop(1)
+    }
+
+    /** Printed line. A PDF has no link, so OpenStreetMap names the license page. */
+    val creditPrint: String get() = spec.creditPrint
+
+    /** Printed line plus the overlay sources actually drawn on that picture. */
+    fun creditLine(overlays: Collection<MapOverlay> = emptyList()): String =
+        MapOverlay.joinCredit(creditPrint, overlays)
+
+    /** Shaded relief and hydrography are overlays, not rows in the Map list. */
+    val inPicker: Boolean
+        get() = this != USGS_SHADED_RELIEF && this != USGS_HYDRO
+
+    val creditUrl: String? get() = spec.creditUrl
+
+    private fun usgs(
+        labelKey: String,
+        cacheName: String,
+        serviceName: String,
+        credit: String = "U.S. Geological Survey",
+    ) = Spec(
+        labelKey = labelKey,
+        cacheName = cacheName,
+        maxZoom = 16,
+        service = null,
+        host = "basemap.nationalmap.gov",
+        keyQuery = null,
+        url = { z, x, y ->
+            "https://basemap.nationalmap.gov/arcgis/rest/services/$serviceName/MapServer/tile/$z/$y/$x"
+        },
+        credit = credit,
+        creditPrint = credit,
+        creditUrl = null,
+        redirectRoots = listOf("nationalmap.gov", "usgs.gov"),
+        usOnly = true,
+    )
+
+    private fun esri(labelKey: String, cacheName: String, style: String, credit: String) = Spec(
+        labelKey = labelKey,
+        cacheName = cacheName,
+        maxZoom = 22,
+        service = MapKeyService.ESRI,
+        host = "static-map-tiles-api.arcgis.com",
+        keyQuery = "token",
+        url = { z, x, y ->
+            "https://static-map-tiles-api.arcgis.com/arcgis/rest/services/" +
+                "static-basemap-tiles-service/v1/arcgis/$style/static/tile/$z/$y/$x"
+        },
+        credit = credit,
+        creditPrint = "$credit · static-map-tiles-api.arcgis.com",
+        creditUrl = "https://www.esri.com/en-us/legal/terms/data-attributions",
+        redirectRoots = listOf("arcgis.com", "arcgisonline.com"),
+    )
+
+    private fun maptiler(
+        labelKey: String,
+        cacheName: String,
+        style: String,
+        format: String,
+        credit: String,
+    ) = Spec(
+        labelKey = labelKey,
+        cacheName = cacheName,
+        maxZoom = 22,
+        service = MapKeyService.MAPTILER,
+        host = "api.maptiler.com",
+        keyQuery = "key",
+        url = { z, x, y -> "https://api.maptiler.com/maps/$style/256/$z/$x/$y.$format" },
+        credit = credit,
+        creditPrint = "$credit · maptiler.com/copyright",
+        creditUrl = "https://www.maptiler.com/copyright/",
+        redirectRoots = listOf("maptiler.com"),
+    )
+
+    private fun stadia(
+        labelKey: String,
+        cacheName: String,
+        style: String,
+        format: String,
+        maxZoom: Int,
+        credit: String,
+    ) = Spec(
+        labelKey = labelKey,
+        cacheName = cacheName,
+        maxZoom = maxZoom,
+        service = MapKeyService.STADIA,
+        host = "tiles.stadiamaps.com",
+        keyQuery = "api_key",
+        url = { z, x, y -> "https://tiles.stadiamaps.com/tiles/$style/$z/$x/$y.$format" },
+        credit = credit,
+        creditPrint = "$credit · stadiamaps.com/attribution",
+        creditUrl = "https://stadiamaps.com/attribution/",
+        redirectRoots = listOf("stadiamaps.com"),
+    )
+
+    private fun thunderforest(labelKey: String, cacheName: String, style: String) = Spec(
+        labelKey = labelKey,
+        cacheName = cacheName,
+        maxZoom = 22,
+        service = MapKeyService.THUNDERFOREST,
+        host = "api.thunderforest.com",
+        keyQuery = "apikey",
+        url = { z, x, y -> "https://api.thunderforest.com/$style/$z/$x/$y.png" },
+        credit = "© Thunderforest © OpenStreetMap",
+        creditPrint = "© Thunderforest © OpenStreetMap · thunderforest.com",
+        creditUrl = "https://www.thunderforest.com/",
+        redirectRoots = listOf("thunderforest.com"),
+    )
+}
+
+/**
+ * Pictures drawn on top of the chosen map. None is the start.
+ * Relief is a gray hillshade and darkens the map under it.
+ * Hydrography is transparent water and is drawn after relief.
+ */
+@Serializable
+enum class MapOverlay {
+    USGS_SHADED_RELIEF,
+    USGS_HYDRO,
+    ;
+
+    val basemap: MapBasemap
+        get() = when (this) {
+            USGS_SHADED_RELIEF -> MapBasemap.USGS_SHADED_RELIEF
+            USGS_HYDRO -> MapBasemap.USGS_HYDRO
+        }
+
+    /** Hillshade tiles are opaque gray. They darken the map instead of covering it. */
+    val multiply: Boolean get() = this == USGS_SHADED_RELIEF
+
+    companion object {
+        /** Relief under the water lines. A set from JSON keeps this order. */
+        fun ordered(selected: Collection<MapOverlay>): List<MapOverlay> =
+            entries.filter { it in selected }
+
+        fun key(selected: Collection<MapOverlay>): String =
+            ordered(selected).joinToString(",") { it.name }.ifEmpty { "none" }
+
+        fun joinCredit(base: String, selected: Collection<MapOverlay>): String {
+            val extra = ordered(selected).joinToString(" · ") { it.basemap.credit }
+            return if (extra.isEmpty()) base else "$base · $extra"
+        }
+    }
+}
+
+/**
+ * Lower-left readout on the on-screen maps. This phone now.
+ * Missing JSON is [OFF]. The path figure does not use it.
+ */
+@Serializable
+enum class MapFooter {
+    OFF,
+    GPS,
+    GRID,
+    ;
+
+    val labelKey: String
+        get() = when (this) {
+            OFF -> "ui.off.label"
+            GPS -> "map.position.gps"
+            GRID -> "ui.grid"
+        }
+}
+
+/**
+ * Compass picture on Show live path and Hunt. Two choices, so four pictures.
+ * Tap the button for north-up or direction of travel. Double-tap the map for
+ * the whole path or the close view around this phone. Reports stay north-up.
+ */
+object MapFrame {
+    /** Whole path, north up. */
+    const val NORTH = 0
+    /** Whole path, travel up. */
+    const val TRAVEL = 1
+    /** Close view, travel up. Older saves used this as the only close view. */
+    const val CLOSE = 2
+    /** Close view, north up. */
+    const val CLOSE_NORTH = 3
+
+    /**
+     * Half the short side of the close view, in meters.
+     * The same scale as a sit that has not moved yet, about 220 m.
+     */
+    val CLOSE_HALF_M: Float = SitPathPlot.MIN_HALF_SPAN_M * SitPathPlot.FIT_PAD
+
+    /** Tile window around you while the close view follows. Covers a turned wide band. */
+    const val CLOSE_TILE_HALF_M = 560f
+
+    /** -1 is an older file. [mapRotate] then picks north-up or travel, zoomed out. */
+    fun resolved(saved: Int, mapRotate: Boolean): Int =
+        if (saved in NORTH..CLOSE_NORTH) saved else if (mapRotate) TRAVEL else NORTH
+
+    /** Close view around this phone. The whole path is the other zoom. */
+    fun zoomed(frame: Int): Boolean = frame == CLOSE || frame == CLOSE_NORTH
+
+    /** Direction of travel is up. North-up frames stay fixed. */
+    fun turns(frame: Int): Boolean = frame == TRAVEL || frame == CLOSE
+
+    /**
+     * Course to draw. A finite held course stays put while the finger has the map.
+     * North-up frames stay north-up. A missing course stays north-up.
+     */
+    fun drawnCourse(frame: Int, heldCourseDeg: Double?, liveCourseDeg: Double): Double {
+        if (!turns(frame)) return Double.NaN
+        if (heldCourseDeg != null && heldCourseDeg.isFinite()) return heldCourseDeg
+        return if (liveCourseDeg.isFinite()) liveCourseDeg else Double.NaN
+    }
+
+    /**
+     * Signed degrees from [from] to [to], in (-180, 180]. A turn past north
+     * stays the short way. A missing angle is no turn.
+     */
+    fun shortestTurn(from: Double, to: Double): Double {
+        if (!from.isFinite() || !to.isFinite()) return 0.0
+        var delta = (to - from) % 360.0
+        if (delta > 180.0) delta -= 360.0
+        if (delta <= -180.0) delta += 360.0
+        return delta
+    }
+
+    /**
+     * How long the drawn map spends turning toward the course that just arrived.
+     * A GPS course shows up about once a second. Spreading the turn across that
+     * gap keeps a curve moving. A late course still finishes within a second.
+     */
+    fun courseTurnMs(gapMs: Long): Int {
+        val gap = if (gapMs <= 0L) COURSE_TURN_MIN_MS else gapMs
+        return gap.coerceIn(COURSE_TURN_MIN_MS, COURSE_TURN_MAX_MS).toInt()
+    }
+
+    const val COURSE_TURN_MIN_MS = 200L
+    const val COURSE_TURN_MAX_MS = 1_000L
+
+    /** [pending] is the frame a tap already showed. The saved frame replaces it once the file catches up. */
+    fun onScreen(pending: Int?, saved: Int): Int =
+        if (pending != null && pending != saved) pending else saved
+
+    /** Tap. North-up and direction of travel trade places. Zoom stays. */
+    fun bearingToggled(current: Int): Int = when (current) {
+        NORTH -> TRAVEL
+        TRAVEL -> NORTH
+        CLOSE -> CLOSE_NORTH
+        CLOSE_NORTH -> CLOSE
+        else -> NORTH
+    }
+
+    /** Double-tap. The whole path and the close view trade places. Bearing stays. */
+    fun zoomToggled(current: Int): Int = when (current) {
+        NORTH -> CLOSE_NORTH
+        CLOSE_NORTH -> NORTH
+        TRAVEL -> CLOSE
+        CLOSE -> TRAVEL
+        else -> NORTH
+    }
+}
+
+/**
+ * Camera marks on Show live path and Reports → Path. Hunt is unchanged.
+ * An older file that saved the path-only choice reads as on.
+ */
+@Serializable(with = MapCameraMarksSerializer::class)
+enum class MapCameraMarks {
+    /** Every camera in this picture. */
+    VIEW,
+
+    /** No camera marks. */
+    OFF,
+    ;
+
+    /** On, then off. */
+    fun next(): MapCameraMarks = when (this) {
+        VIEW -> OFF
+        OFF -> VIEW
+    }
+
+    fun descriptionKey(): String = when (this) {
+        VIEW -> "map.cameras.view"
+        OFF -> "map.cameras.off"
+    }
+
+    companion object {
+        /** A tap already showed [pending]. The saved value replaces it once the file catches up. */
+        fun onScreen(pending: MapCameraMarks?, saved: MapCameraMarks): MapCameraMarks =
+            if (pending != null && pending != saved) pending else saved
+    }
+}
+
+object MapCameraMarksSerializer : KSerializer<MapCameraMarks> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor("MapCameraMarks", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: MapCameraMarks) {
+        encoder.encodeString(value.name)
+    }
+
+    override fun deserialize(decoder: Decoder): MapCameraMarks = when (decoder.decodeString()) {
+        "OFF" -> MapCameraMarks.OFF
+        "VIEW", "PATH" -> MapCameraMarks.VIEW
+        else -> MapCameraMarks.VIEW
+    }
+}
+
 @Serializable
 data class AppSettings(
     /** Kept in settings packs. The UI is always dark; Night mode is the red overlay. */
@@ -566,16 +1337,72 @@ data class AppSettings(
     val alertVoice: Boolean = true,
     /** Class (Live glyph), signature name, or both. Only used while [alertVoice] is on. */
     val alertVoiceWhat: AlertVoiceWhat = AlertVoiceWhat.BOTH,
+    /**
+     * Spoken stand-in for a signature plus one advertised network name.
+     * Missing JSON is none. Export settings keeps the list. The catalog does not.
+     */
+    val spokenNames: List<SpokenName> = emptyList(),
     val snapToBeep: Boolean = true,
     val alertShade: Boolean = false,
     val tagLocation: Boolean = true,
+    /**
+     * Remember a stable tracker heard at two or more places, and a return after
+     * a quiet stretch. Ordinary Wi-Fi and Bluetooth stay out. Missing JSON is on.
+     */
+    val placeWatch: Boolean = true,
     /** Reverse-geocode GPS stamps in Debrief when the phone is online. Default on. */
     val onlineLookup: Boolean = true,
+    /** Which raster [onlineLookup] loads. Missing JSON is OpenStreetMap. Turning maps off keeps this. */
+    val mapBasemap: MapBasemap = MapBasemap.OSM,
+    /**
+     * Shaded relief and hydrography on top of [mapBasemap]. Missing JSON is none.
+     * An older file that picked either one as the map moves it here and returns to OpenStreetMap.
+     */
+    val mapOverlays: Set<MapOverlay> = emptySet(),
+    /** Plate readers on the path maps. Off until chosen. Turning this off keeps the saved file. */
+    val flockLayer: Boolean = false,
+    /** Other sensors on the path maps. Off until chosen. Turning this off keeps the saved file. */
+    val sensorLayer: Boolean = false,
+    /** Notify when a plate reader is ahead. Off until chosen. Acts only while [flockLayer] is on. */
+    val flockAlert: Boolean = false,
+    /** Notify when a speed camera is ahead. Off until chosen. Acts only while [sensorLayer] is on. */
+    val speedAlert: Boolean = false,
+    /** Notify when a red-light camera is ahead. Off until chosen. Acts only while [sensorLayer] is on. */
+    val redAlert: Boolean = false,
+    /** Notify when a gunshot detector is ahead. Off until chosen. Acts only while [sensorLayer] is on. */
+    val gunshotAlert: Boolean = false,
+    /** Notify when another mapped camera is ahead. Off until chosen. Acts only while [sensorLayer] is on. */
+    val cameraAlert: Boolean = false,
+    /** Lower left of the on-screen map. Missing JSON is off. */
+    val mapFooter: MapFooter = MapFooter.OFF,
+    /**
+     * Show live path and Hunt follow travel while the map is following.
+     * Missing JSON keeps north up. The compass button is the only control.
+     * Kept so an older file still decodes. [mapFrame] wins once it is set.
+     */
+    val mapRotate: Boolean = false,
+    /**
+     * Compass picture. [MapFrame.NORTH], [MapFrame.TRAVEL], [MapFrame.CLOSE],
+     * or [MapFrame.CLOSE_NORTH]. -1 is an older file: [mapRotate] chooses
+     * north-up or travel, zoomed out.
+     */
+    val mapFrame: Int = -1,
+    /**
+     * Camera marks on Show live path and Reports → Path.
+     * Missing JSON shows every camera in the picture.
+     */
+    val mapCameras: MapCameraMarks = MapCameraMarks.VIEW,
+    /** Kept so an older file still decodes. The double-tap no longer reads it. */
+    val mapHome: Int = MapFrame.NORTH,
     val viewMode: ViewMode = ViewMode.BY_CLASS,
     val strengthSort: StrengthSort = StrengthSort.AVERAGE,
     val averageWindowSec: Int = 30,
     val listSort: ListSort = ListSort.STRENGTH,
     val showRssiBar: Boolean = true,
+    /** Map of this phone's walk above the live list. Off until chosen. Radar leaves the saved value and does not show the map. */
+    val showLivePath: Boolean = false,
+    /** Share of the live list area given to the path. Dragging clamps it. */
+    val livePathSplit: Float = 0.5f,
     val showFleetName: Boolean = true,
     val showFrequency: Boolean = true,
     val showSeenTimes: Boolean = true,
@@ -639,10 +1466,22 @@ data class AppSettings(
     val takWatchlist: Boolean = false,
     /** Every labeled signature. Noisy. Off by default. */
     val takAllSignatures: Boolean = false,
-    /** GNSS line on this phone's TAK marker. Off until chosen. */
+    /** GNSS line on this phone's TAK marker, plus a pin or oval where the phone was. Off until chosen. */
     val takGnss: TakGnssSend = TakGnssSend.OFF,
+    /** How long that GNSS mark stays on the map. Missing JSON is 1 hour. */
+    val takGnssHold: TakGnssHold = TakGnssHold.HOUR,
+    /**
+     * How long a radio spot keeps its name after it leaves the feed.
+     * Missing JSON is 1 hour. The phone marker stays on the 2-minute refresh.
+     */
+    val takRadioHold: TakGnssHold = TakGnssHold.HOUR,
     /** Flood line on this phone's TAK marker while a flood is detected. */
     val takFlood: TakFloodSend = TakFloodSend.OFF,
+    /**
+     * Map name for this phone. Blank sends Fieldwatch- plus the install tag.
+     * A typed name is copied with settings. The tag is not.
+     */
+    val takCallsign: String = "",
     /**
      * Red-on-black field display. Off by default. The rest of the UI is always dark.
      * Phone brightness is unchanged.
@@ -653,6 +1492,11 @@ data class AppSettings(
     val disclaimerRev: Int = 0,
     /** Chrome overlay on Live after the license. Settings can show it again. */
     val liveTourDone: Boolean = false,
+    /**
+     * Last Live-tour offer applied on this phone. Missing or older than [LIVE_TOUR_REV]
+     * shows the tour once more, then this catches up so later launches do not.
+     */
+    val liveTourRev: Int = 0,
     /** Signatures tab: Name A–Z (default) or Class A–Z. */
     val signatureListSort: SignatureListSort = SignatureListSort.NAME,
     /** By class: hide class headers with 0 radios. Off = show all (zeros stay). */
@@ -676,11 +1520,90 @@ data class AppSettings(
     val gnssCorrelation: Boolean = false,
     /** A few phones report gain backwards. Off unless a router test rises. */
     val gnssInvertAgc: Boolean = false,
+    /** Raw GNSS file around a hit. Off until chosen. Privacy mode does not record. */
+    val gnssRawLog: Boolean = false,
+    /** Watch trusted Wi-Fi names. Off until chosen. The learned list is a separate file. */
+    val trustedWatch: Boolean = false,
+    /** Alert when a trusted name is seen with a weaker profile. */
+    val trustedDowngrade: Boolean = true,
+    /** Alert when a trusted name is seen from a factory maker that was not learned. */
+    val trustedVendor: Boolean = true,
+    /** Alert when a trusted name is heard far from its usual places. */
+    val trustedAway: Boolean = true,
+    /** Meters. Missing JSON is 1 km. */
+    val trustedAwayMeters: Int = 1_000,
+    /** A quieter hear does not alert. Missing JSON is -85 dBm. */
+    val trustedFloorDbm: Int = -85,
+    /** Learn new access points during the window. Missing JSON is on. */
+    val trustedLearn: Boolean = true,
+    /** Days after the name was trusted. 0 is 1 hour. Missing JSON is 3 days. */
+    val trustedLearnDays: Int = 3,
+    /** Beep for this feature. Not the watchlist beep. */
+    val trustedBeep: Boolean = true,
+    /** Speak a trusted-network alert. Not the watchlist voice. */
+    val trustedVoice: Boolean = true,
+    /** System notification for this feature. Off until chosen. */
+    val trustedShade: Boolean = false,
+    /** Popup, beep, voice, and the sit block start at this confidence. */
+    val trustedAlertFloor: GnssAlertFloor = GnssAlertFloor.MEDIUM,
+    /** TAK pin for a trusted-network alert. Off until chosen. */
+    val trustedTak: Boolean = false,
+    /** How long that pin stays. Missing JSON is 1 hour. */
+    val trustedTakHold: TakGnssHold = TakGnssHold.HOUR,
+    /** Watch this phone's serving cell. Off until chosen. Places are a separate file. */
+    val cellWatch: Boolean = false,
+    /** Warn when a learned place is still and the serving cell is new. */
+    val cellWarnNew: Boolean = true,
+    /** Warn when a 4G or 5G place drops to 2G or 3G. */
+    val cellWarnDrop: Boolean = true,
+    /**
+     * Days after a place is opened. 0 is none: the first visit is the only quiet one.
+     * Missing JSON is 3, the same start trusted networks use.
+     */
+    val cellLearnDays: Int = 3,
+    /** Beep for this feature. Not the watchlist beep. */
+    val cellBeep: Boolean = true,
+    /** Speak a cell warning. Not the watchlist voice. */
+    val cellVoice: Boolean = true,
+    /** System notification for this feature. Off until chosen. */
+    val cellShade: Boolean = false,
+    /** Popup when a separated tag stays with this phone. Off until chosen. */
+    val trackerFollow: Boolean = false,
+    /** Popup when a finder reaches two stops. Off until chosen. The place list stays. */
+    val trackerPlaces: Boolean = false,
 )
 
 const val DISCLAIMER_REV = 3
 
+/** Bump when an upgrade should show the Live tour one more time. */
+const val LIVE_TOUR_REV = 1
+
 fun AppSettings.disclaimerOk(): Boolean = disclaimerRev >= DISCLAIMER_REV
+
+/**
+ * Shaded relief and hydrography used to be map choices.
+ * A saved choice becomes that overlay on OpenStreetMap.
+ */
+fun AppSettings.withOverlayBasemaps(): AppSettings {
+    val moved = when (mapBasemap) {
+        MapBasemap.USGS_SHADED_RELIEF -> MapOverlay.USGS_SHADED_RELIEF
+        MapBasemap.USGS_HYDRO -> MapOverlay.USGS_HYDRO
+        else -> return this
+    }
+    return copy(
+        mapBasemap = MapBasemap.OSM,
+        mapOverlays = mapOverlays + moved,
+    )
+}
+
+/** One offer per [LIVE_TOUR_REV]. A phone already on this rev is left as saved. */
+fun AppSettings.offerLiveTourOnce(): AppSettings {
+    if (liveTourRev >= LIVE_TOUR_REV) return this
+    return copy(liveTourDone = false, liveTourRev = LIVE_TOUR_REV)
+}
+
+/** The path band sits over a list. Radar has no list, so the switch stays as saved and the band stays off. */
+fun AppSettings.livePathOnScreen(): Boolean = showLivePath && viewMode != ViewMode.RADAR
 
 data class DetectionPolicy(
     val ssidKeywords: Boolean = true,
@@ -700,6 +1623,7 @@ fun AppSettings.gnssSettings(): List<Any> = listOf(
     gnssFullTracking,
     gnssCorrelation,
     gnssInvertAgc,
+    gnssRawLog,
 )
 
 fun AppSettings.detectionPolicy() = DetectionPolicy(
@@ -720,6 +1644,16 @@ data class PersistedConfig(
     val arrivalKnownKeys: Set<String> = emptySet(),
     /** Stock filter-chip ids the operator removed. Catalog migrates do not put these back. */
     val hiddenPresetIds: Set<String> = emptySet(),
+    /**
+     * 4-character id for this install's TAK markers. Not part of a settings pack.
+     * Blank until the first load fills it. A new install is filled in the seed.
+     */
+    val takInstallTag: String = "",
+    /**
+     * True after FIELDWATCH-SELF was deleted, or when this install never sent that name.
+     * A missing key on an older file stays false so the delete can still go out.
+     */
+    val takLegacySelfRetired: Boolean = false,
 )
 
 data class RssiSample(
@@ -776,9 +1710,13 @@ data class Sighting(
     val payloadLat: Double? = null,
     val payloadLon: Double? = null,
     val payloadAlt: Double? = null,
-    /** Remote ID System operator (pilot) location. Not the aircraft pin. */
+    /** Remote ID System operator location. Not the aircraft pin. */
     val payloadOpLat: Double? = null,
     val payloadOpLon: Double? = null,
+    /** 0 takeoff, 1 live GPS, 2 fixed. Null until a System message says. */
+    val payloadOpKind: Int? = null,
+    /** Last known operator altitude in meters. Unknown stays null. */
+    val payloadOpAlt: Double? = null,
     /** Sticky Remote ID Basic ID / Self ID. TAK keys the aircraft on uas_id when present. */
     val payloadUasId: String? = null,
     /**
@@ -790,13 +1728,38 @@ data class Sighting(
     val payloadHeading: Double? = null,
     val payloadSpeed: Double? = null,
     val payloadVspeed: Double? = null,
+    /** ASTM Auth. A later page keeps the page-0 header. A Location message leaves it. */
+    val payloadAuth: RemoteIdAuth? = null,
     /** Advertised fixes kept by the sit. Empty on a live radio that has not been saved into one. */
     val payloadTrail: List<PayloadFix> = emptyList(),
     /** Decoded labels a signature asked to show on the live row. Empty for every other radio. */
     val liveDecode: List<LiveDecodeChip> = emptyList(),
+    /** When the last packet that carried an aircraft latitude was read. */
+    val payloadAt: Long? = null,
+    /** Where this phone was at [payloadAt]. Null when that packet had no phone fix. */
+    val payloadPhoneLat: Double? = null,
+    val payloadPhoneLon: Double? = null,
+    /** When the last packet that carried an operator location was read. */
+    val payloadOpAt: Long? = null,
+    /** Where this phone was at [payloadOpAt]. */
+    val payloadOpPhoneLat: Double? = null,
+    val payloadOpPhoneLon: Double? = null,
+    /**
+     * Samsung SmartTag privacy ID while the latest FD5A frame is separated.
+     * Not a device key. Null for with owner, unlabeled, and rejected frames.
+     */
+    val smartTagId: String? = null,
 ) {
     val displayName: String
         get() = name.ifBlank { if (hiddenSsid) "<hidden>" else mac }
+
+    /**
+     * Bluetooth row the detail page calls a random address.
+     * The local bit, or an address type of Random. Wi-Fi is never this.
+     */
+    fun randomBleAddress(): Boolean =
+        kind == RadioKind.BLE &&
+            (randomized || facts.addressType.equals("Random", ignoreCase = true))
 
     /** Custom name from Named radios, else advertised / hidden / MAC. */
     fun reportName(customNames: Map<String, String>): String {
@@ -879,7 +1842,8 @@ data class Sighting(
     }
 
     fun heardRssi(sort: StrengthSort, windowMs: Long, now: Long = System.currentTimeMillis()): Double {
-        return if (sort == StrengthSort.AVERAGE) averageRssi(windowMs, now) else rssi.toDouble()
+        if (sort == StrengthSort.AVERAGE) return averageRssi(windowMs, now)
+        return Rssi.rank(rssi)
     }
 
     fun sortRssi(
@@ -1087,7 +2051,8 @@ object Palette {
     fun color(index: Int): Int = fleet[index.mod(fleet.size)]
 }
 
-fun RadioKind.label(): String = if (this == RadioKind.WIFI) "Wi-Fi" else "BLE"
+fun RadioKind.label(): String =
+    if (this == RadioKind.WIFI) LanguageText.text("radio.wifi") else LanguageText.text("radio.ble")
 
 fun uuidShortOrFull(raw: String): String {
     val hex = raw.filter { it.isLetterOrDigit() }.uppercase()
@@ -1098,21 +2063,56 @@ fun uuidShortOrFull(raw: String): String {
     }
 }
 
+private const val BT_BASE_TAIL = "00001000800000805F9B34FB"
+
 fun uuidAliases(raw: String): Set<String> {
     val hex = raw.filter { it.isLetterOrDigit() }.uppercase()
     val out = mutableSetOf(raw.uppercase(), hex)
     if (hex.length == 4) {
         out += "0x$hex"
+        out += "0000$hex"
         out += "0000$hex-0000-1000-8000-00805F9B34FB"
-        out += "0000${hex}00001000800000805F9B34FB"
+        out += "0000$hex$BT_BASE_TAIL"
         return out
     }
-    // 16-bit alias only for Bluetooth SIG base UUIDs (0000XXXX-0000-1000-8000-00805F9B34FB).
-    if (hex.length == 32 && hex.startsWith("0000") && hex.endsWith("00001000800000805F9B34FB")) {
-        val short = hex.substring(4, 8)
-        out += short
-        out += "0x$short"
-        out += "0000$short-0000-1000-8000-00805F9B34FB"
+    // 32-bit form is 8 hex. It maps onto the Bluetooth base. The 16-bit short
+    // is only the low half when the high half is 0000.
+    if (hex.length == 8) {
+        out += "$hex-0000-1000-8000-00805F9B34FB"
+        out += "$hex$BT_BASE_TAIL"
+        if (hex.startsWith("0000")) addBluetooth16(out, hex.substring(4, 8))
+        return out
+    }
+    if (hex.length == 32 && hex.endsWith(BT_BASE_TAIL)) {
+        val uuid32 = hex.substring(0, 8)
+        out += uuid32
+        out += "$uuid32-0000-1000-8000-00805F9B34FB"
+        if (hex.startsWith("0000")) addBluetooth16(out, hex.substring(4, 8))
     }
     return out
+}
+
+/**
+ * Text for a service-UUID rule. A Bluetooth 16-bit UUID becomes the 4-hex short.
+ * A 32-bit UUID whose top half is not 0000 stays 8 hex. Any other 128-bit UUID
+ * stays the full 32 hex. A proprietary UUID is not sliced down to four digits.
+ */
+fun serviceUuidRule(raw: String): String? {
+    val hex = raw.filter { it.isLetterOrDigit() }.uppercase()
+    return when {
+        hex.length == 4 -> hex
+        hex.length == 8 && hex.startsWith("0000") -> hex.substring(4, 8)
+        hex.length == 8 -> hex
+        hex.length == 32 && hex.startsWith("0000") && hex.endsWith(BT_BASE_TAIL) -> hex.substring(4, 8)
+        hex.length == 32 && hex.endsWith(BT_BASE_TAIL) -> hex.substring(0, 8)
+        hex.length == 32 -> hex
+        else -> null
+    }
+}
+
+private fun addBluetooth16(out: MutableSet<String>, short: String) {
+    out += short
+    out += "0x$short"
+    out += "0000$short-0000-1000-8000-00805F9B34FB"
+    out += "0000$short$BT_BASE_TAIL"
 }

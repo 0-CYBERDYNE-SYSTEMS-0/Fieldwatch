@@ -7,8 +7,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,26 +22,36 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
 import app.fieldwatch.ui.component.FieldwatchFilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import app.fieldwatch.ui.component.FieldwatchActionButton
+import app.fieldwatch.ui.component.FieldwatchDropdownField
 import app.fieldwatch.ui.component.FieldwatchOutlinedField
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import app.fieldwatch.ui.component.FieldwatchSlider
+import androidx.compose.material3.Surface
 import app.fieldwatch.ui.component.FieldwatchSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -46,10 +59,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.fieldwatch.R
@@ -57,13 +76,20 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.fieldwatch.domain.AlertVoiceWhat
+import app.fieldwatch.domain.LanguageText
 import app.fieldwatch.domain.AppSettings
+import app.fieldwatch.domain.MapBasemap
+import app.fieldwatch.domain.MapFooter
+import app.fieldwatch.domain.MapOverlay
+import app.fieldwatch.domain.MapKey
 import app.fieldwatch.domain.GnssAlertFloor
 import app.fieldwatch.domain.GnssSensitivity
 import app.fieldwatch.domain.ScanIntensity
 import app.fieldwatch.domain.TakDefaults
+import app.fieldwatch.domain.TakInstall
 import app.fieldwatch.domain.TakFeedStatus
 import app.fieldwatch.domain.TakFloodSend
+import app.fieldwatch.domain.TakGnssHold
 import app.fieldwatch.domain.TakGnssSend
 import app.fieldwatch.domain.TakPublish
 import app.fieldwatch.domain.TakUdpPreset
@@ -72,8 +98,8 @@ import app.fieldwatch.ui.NestedTabInsets
 import app.fieldwatch.ui.NestedTopBar
 import app.fieldwatch.ui.FieldwatchUi
 import app.fieldwatch.ui.FieldwatchViewModel
+import app.fieldwatch.ui.FlockLayerUi
 import app.fieldwatch.ui.component.SectionCard
-import app.fieldwatch.ui.component.FieldwatchFilterChip
 import app.fieldwatch.ui.component.StableCaption
 import app.fieldwatch.ui.component.StickyHeight
 import java.net.Inet4Address
@@ -85,11 +111,14 @@ fun SettingsScreen(
     state: FieldwatchUi,
     vm: FieldwatchViewModel,
     onRadioBookmarks: () -> Unit,
+    onSpokenNames: () -> Unit,
     onScanStatus: () -> Unit,
     onShowLiveTour: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = state.settings
+    val flock by vm.flockLayerUi.collectAsStateWithLifecycle()
+    val sensors by vm.sensorLayerUi.collectAsStateWithLifecycle()
     val saveSignatures = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/json"),
     ) { uri -> uri?.let(vm::saveSignaturesToUri) }
@@ -102,58 +131,116 @@ fun SettingsScreen(
     val importSettings = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> uri?.let(vm::importSettingsFromUri) }
+    val importLanguage = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> uri?.let(vm::importLanguageFromUri) }
+    val language by vm.language.collectAsStateWithLifecycle()
     var confirmRestore by remember { mutableStateOf(false) }
     val pendingSettingsImport by vm.pendingSettingsImport.collectAsStateWithLifecycle()
     val gnssProfile by vm.gnssProfile.collectAsStateWithLifecycle()
     val gnssCal by vm.gnssCalibration.collectAsStateWithLifecycle()
+    val gnssRecordings by vm.gnssRecordings.collectAsStateWithLifecycle()
     val gnssReady = gnssProfile != null
+    var topicName by rememberSaveable { mutableStateOf<String?>(null) }
+    var closeCellPlace by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var mapMenu by rememberSaveable { mutableStateOf(false) }
+    var positionMenu by rememberSaveable { mutableStateOf(false) }
+    var confirmClearMaps by rememberSaveable { mutableStateOf(false) }
+    val topic = topicName?.let { name -> SettingsTopic.entries.firstOrNull { it.name == name } }
+    val leaveTopic = {
+        val close = closeCellPlace
+        if (close != null) close() else topicName = null
+    }
+    BackHandler(enabled = topic != null, onBack = leaveTopic)
+    val scroll = rememberScrollState()
+    LaunchedEffect(topicName) { scroll.scrollTo(0) }
+    LaunchedEffect(settings.onlineLookup) {
+        if (!settings.onlineLookup) mapMenu = false
+    }
     Scaffold(
         contentWindowInsets = NestedTabInsets,
-        topBar = { NestedTopBar("Settings") },
+        topBar = {
+            NestedTopBar(
+                title = topic?.title() ?: LanguageText.text("tab.settings"),
+                navigationIcon = {
+                    if (topic != null) {
+                        IconButton(onClick = leaveTopic) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, LanguageText.text("chrome.back"))
+                        }
+                    }
+                },
+            )
+        },
     ) { pad ->
-        Column(
+        if (topic == SettingsTopic.CELL) {
+            CellWatchPage(
+                vm,
+                settings,
+                state.phoneLat,
+                state.phoneLon,
+                onPlaceBack = { closeCellPlace = it },
+                modifier = Modifier
+                    .padding(pad)
+                    .fillMaxSize(),
+            )
+        } else Column(
             Modifier
                 .padding(pad)
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scroll)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            SectionCard("Appearance") {
+            if (topic == null) {
+                SettingsTopicList(
+                    settings = settings,
+                    catalogVersion = state.catalogVersion,
+                    takInstallTag = state.takInstallTag,
+                    gnssReady = gnssReady,
+                    languageName = language.snap.activeName,
+                    namedRadioCount = state.watchlist.count { it.deviceKey != null },
+                    onNamedRadios = onRadioBookmarks,
+                    onOpen = { topicName = it.name },
+                )
+            }
+            if (topic == SettingsTopic.APPEARANCE) {
+            SectionCard(LanguageText.text("settings.topic.appearance"), showTitle = false) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Night mode", Modifier.weight(1f))
+                Text(LanguageText.text("ui.night.mode"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.nightMode, { on -> vm.updateSettings { it.copy(nightMode = on) } })
             }
             Text(
-                "Red on black so a dark sit stays dim. Phone brightness does not change.",
+                LanguageText.text("ui.red.black.so.dark"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Keep screen on", Modifier.weight(1f))
+                Text(LanguageText.text("ui.keep.screen"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.keepScreenOn, { on -> vm.updateSettings { it.copy(keepScreenOn = on) } })
             }
             Text(
-                "The screen stays awake while sw33p3r_ is open, so Bluetooth keeps scanning. The scan still runs from the notification if you leave the app. Turn this off when you pocket the phone.",
+                LanguageText.text("ui.screen.stays.awake.while"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Privacy mode", Modifier.weight(1f))
+                Text(LanguageText.text("ui.privacy.mode"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.demoMode, { on -> vm.updateSettings { it.copy(demoMode = on) } })
             }
             Text(
-                "Hides the last half of each MAC on screen and in sit reports. Coordinates show as masked, and street names are left out. The vendor prefix stays. Logs, matching, and Hunt still use the real address and position. The TAK feed pauses so those are not sent. The Path map still loads if Online place names and maps is on. Turn this off when you need the full address on screen.",
+                LanguageText.text("ui.hides.last.half.each"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             }
+            }
 
-            SectionCard("Scanning") {
+            if (topic == SettingsTopic.SCANNING) {
+            SectionCard(LanguageText.text("settings.topic.scanning"), showTitle = false) {
             val label = when (settings.intensity) {
-                ScanIntensity.SAVER -> "Battery saver"
-                ScanIntensity.BALANCED -> "Balanced"
-                ScanIntensity.PERFORMANCE -> "High performance"
+                ScanIntensity.SAVER -> LanguageText.text("ui.battery.saver")
+                ScanIntensity.BALANCED -> LanguageText.text("ui.balanced.label")
+                ScanIntensity.PERFORMANCE -> LanguageText.text("ui.high.performance")
             }
             Text("Scan intensity  ·  $label")
             FieldwatchSlider(
@@ -166,15 +253,15 @@ fun SettingsScreen(
                 steps = 1,
             )
             Text(
-                "Wi-Fi reads every access point at once, then has to wait. High performance asks about every 30 seconds, which is as fast as Android allows. Bluetooth keeps listening between those scans.",
+                LanguageText.text("ui.wi.fi.reads.every"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             StableCaption(
                 state.throttleHint.ifBlank { " " },
-                "Wi-Fi waiting on OS",
-                "Wi-Fi scanning",
-                "Wi-Fi next 99s",
+                LanguageText.text("ui.wi.fi.waiting.os"),
+                LanguageText.text("ui.wi.fi.scanning"),
+                LanguageText.text("ui.wi.fi.next.99s"),
                 " ",
             )
 
@@ -196,7 +283,7 @@ fun SettingsScreen(
                 onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Faster Wi-Fi AP scans", Modifier.weight(1f))
+                Text(LanguageText.text("ui.faster.wi.fi.ap"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     checked = !osThrottled,
                     onCheckedChange = { needDevOptions = true },
@@ -205,28 +292,28 @@ fun SettingsScreen(
             StableCaption(
                 when {
                     Build.VERSION.SDK_INT < 30 ->
-                        "This phone is older than Android 11, so sw33p3r_ cannot tell if Wi-Fi scan throttling is on. The switch stays off."
+                        LanguageText.text("ui.phone.older.than.android")
                     !osThrottled ->
-                        "On. A new access-point list about every 8 seconds. Uses more battery. This matches Wi-Fi scan throttling in Developer options."
+                        LanguageText.text("ui.new.access.point.list")
                     else ->
-                        "Off. Android is limiting Wi-Fi scans to about four per two minutes. Tap the switch to open Developer options."
+                        LanguageText.text("ui.off.android.limiting.wi")
                 },
-                "This phone is older than Android 11, so sw33p3r_ cannot tell if Wi-Fi scan throttling is on. The switch stays off.",
-                "On. A new access-point list about every 8 seconds. Uses more battery. This matches Wi-Fi scan throttling in Developer options.",
-                "Off. Android is limiting Wi-Fi scans to about four per two minutes. Tap the switch to open Developer options.",
+                LanguageText.text("ui.phone.older.than.android"),
+                LanguageText.text("ui.new.access.point.list"),
+                LanguageText.text("ui.off.android.limiting.wi"),
             )
             if (needDevOptions) {
                 AlertDialog(
                     onDismissRequest = { needDevOptions = false },
-                    title = { Text("Faster Wi-Fi AP scans") },
+                    title = { Text(LanguageText.text("ui.faster.wi.fi.ap")) },
                     text = {
                         Text(
                             if (Build.VERSION.SDK_INT < 30) {
-                                "This phone is older than Android 11, so sw33p3r_ cannot tell if Wi-Fi scan throttling is on. Faster scanning stays off."
+                                LanguageText.text("ui.phone.older.than.android.2")
                             } else if (osThrottled) {
-                                "This opens Developer options. Turn Wi-Fi scan throttling off. sw33p3r_ matches that switch when you come back."
+                                LanguageText.text("ui.opens.developer.options.turn")
                             } else {
-                                "This opens Developer options. Turn Wi-Fi scan throttling on to use the normal wait. sw33p3r_ matches that switch when you come back."
+                                LanguageText.text("ui.opens.developer.options.turn.2")
                             },
                         )
                     },
@@ -239,39 +326,39 @@ fun SettingsScreen(
                                         context.startActivity(Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS))
                                     }
                                 },
-                            ) { Text("Open developer options") }
+                            ) { Text(LanguageText.text("ui.open.developer.options")) }
                         } else {
-                            TextButton(onClick = { needDevOptions = false }) { Text("OK") }
+                            TextButton(onClick = { needDevOptions = false }) { Text(LanguageText.text("ui.ok.label")) }
                         }
                     },
                     dismissButton = {
                         if (Build.VERSION.SDK_INT >= 30) {
-                            TextButton(onClick = { needDevOptions = false }) { Text("Not now") }
+                            TextButton(onClick = { needDevOptions = false }) { Text(LanguageText.text("ui.not.now")) }
                         }
                     },
                 )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Allow background usage", Modifier.weight(1f))
+                Text(LanguageText.text("ui.allow.background.usage"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     checked = backgroundAllowed,
                     onCheckedChange = { batteryGate = BatteryAndroidGate.BACKGROUND },
                 )
             }
             Text(
-                "Opens this app’s battery page. Turn on Allow background usage there. If it is off, Android can stop the scan when you leave.",
+                LanguageText.text("ui.opens.app.s.battery"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Unrestricted battery", Modifier.weight(1f))
+                Text(LanguageText.text("ui.unrestricted.battery"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     checked = unrestricted,
                     onCheckedChange = { batteryGate = BatteryAndroidGate.UNRESTRICTED },
                 )
             }
             Text(
-                "Opens the same battery page. Choose Unrestricted. On some phones, including Samsung, tap Allow background usage first, then choose Unrestricted.",
+                LanguageText.text("ui.opens.same.battery.page"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -280,14 +367,14 @@ fun SettingsScreen(
                 AlertDialog(
                     onDismissRequest = { batteryGate = null },
                     title = {
-                        Text(if (background) "Allow background usage" else "Unrestricted battery")
+                        Text(if (background) LanguageText.text("ui.allow.background.usage") else LanguageText.text("ui.unrestricted.battery"))
                     },
                     text = {
                         Text(
                             if (background) {
-                                "This opens sw33p3r_’s battery page. Turn on Allow background usage. sw33p3r_ matches it when you come back."
+                                LanguageText.text("ui.opens.fieldwatch.s.battery")
                             } else {
-                                "Choose Unrestricted. On some phones, including Samsung, tap the words Allow background usage, then choose Unrestricted. sw33p3r_ matches it when you come back."
+                                LanguageText.text("ui.choose.unrestricted.some.phones")
                             },
                         )
                     },
@@ -301,37 +388,29 @@ fun SettingsScreen(
                                     highlightBackground = gate == BatteryAndroidGate.BACKGROUND,
                                 )
                             },
-                        ) { Text("Open Android settings") }
+                        ) { Text(LanguageText.text("ui.open.android.settings")) }
                     },
                     dismissButton = {
-                        TextButton(onClick = { batteryGate = null }) { Text("Not now") }
+                        TextButton(onClick = { batteryGate = null }) { Text(LanguageText.text("ui.not.now")) }
                     },
                 )
             }
             }
+            }
 
-            SectionCard("Watchlist") {
+            if (topic == SettingsTopic.WATCHLIST) {
+            SectionCard(LanguageText.text("settings.topic.alerts"), showTitle = false) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Watchlist alerts", Modifier.weight(1f))
+                Text(LanguageText.text("ui.watchlist.alerts"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.alertsEnabled, { on -> vm.updateSettings { it.copy(alertsEnabled = on) } })
             }
             Text(
-                "Beep, voice, flash, and the jump when a bookmarked signature or named radio appears. If this is off, bookmarks stay, and Fieldwatch stays quiet.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            val radioWatchN = state.watchlist.count { it.deviceKey != null }
-            FieldwatchActionButton(
-                onClick = onRadioBookmarks,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Named radios ($radioWatchN)") }
-            Text(
-                "A name for one MAC. Alert is optional. Filters → Named radios shows them on Live. Signature watches stay on the Signatures tab.",
+                LanguageText.text("ui.beep.voice.flash.jump"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Beep on watched signature", Modifier.weight(1f))
+                Text(LanguageText.text("ui.beep.watched.signature"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     settings.alertBeep,
                     { on -> vm.updateSettings { it.copy(alertBeep = on) } },
@@ -339,12 +418,12 @@ fun SettingsScreen(
                 )
             }
             Text(
-                "A double pip on the media volume when a watched radio first appears, or comes back after leaving. It does not repeat while that radio stays in view. You can use the beep, the voice, or both. Turn the media volume up if you hear nothing, then tap Test alert.",
+                LanguageText.text("ui.double.pip.media.volume"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Voice on watched signature", Modifier.weight(1f))
+                Text(LanguageText.text("ui.voice.watched.signature"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     settings.alertVoice,
                     { on -> vm.updateSettings { it.copy(alertVoice = on) } },
@@ -352,11 +431,11 @@ fun SettingsScreen(
                 )
             }
             Text(
-                "Speaks the watch on the same volume as the beep. You can use the beep, the voice, or both. A second hit is skipped if Fieldwatch is already speaking. With no speech engine, the beep still plays if Beep is on.",
+                LanguageText.text("ui.says.class.signature.same"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Text("What to say", style = MaterialTheme.typography.labelLarge)
+            Text(LanguageText.text("ui.what.say"), style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 AlertVoiceWhat.entries.forEach { item ->
                     FieldwatchFilterChip(
@@ -368,17 +447,30 @@ fun SettingsScreen(
                 }
             }
             Text(
-                "Class is the group on Live, such as finder tags or audio. Signature is the catalog name, such as Apple AirTags. Class + signature says both. A named radio with Alert on always says the name you gave it.",
+                LanguageText.text("ui.class.group.live.such"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            }
+            SettingsTopicRow(
+                LanguageText.text("settings.spoken.names"),
+                spokenNamesValue(settings),
+                onSpokenNames,
+            )
+            Text(
+                LanguageText.text("alerts.signature.note"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 14.dp),
+            )
+            SectionCard(LanguageText.text("settings.topic.alerts"), showTitle = false) {
             FieldwatchActionButton(
                 onClick = vm::testWatchBeep,
                 modifier = Modifier.fillMaxWidth(),
                 enabled = settings.alertsEnabled && (settings.alertBeep || settings.alertVoice),
-            ) { Text("Test alert") }
+            ) { Text(LanguageText.text("ui.test.alert")) }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Jump to new watched detection", Modifier.weight(1f))
+                Text(LanguageText.text("ui.jump.new.watched.detection"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     settings.snapToBeep,
                     { on -> vm.updateSettings { it.copy(snapToBeep = on) } },
@@ -386,12 +478,12 @@ fun SettingsScreen(
                 )
             }
             Text(
-                "Live scrolls to a new watched radio so you can see the flash. Turn this off if you do not want the list to move.",
+                LanguageText.text("ui.live.scrolls.new.watched"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("System notification", Modifier.weight(1f))
+                Text(LanguageText.text("ui.system.notification"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     settings.alertShade,
                     { on -> vm.updateSettings { it.copy(alertShade = on) } },
@@ -399,43 +491,304 @@ fun SettingsScreen(
                 )
             }
             Text(
-                "A silent notification when a watched radio appears. The beep and the flash are enough for most sits.",
+                LanguageText.text("ui.silent.notification.when.watched"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             }
+            }
 
-            SectionCard("Location") {
+            if (topic == SettingsTopic.LOCATION) {
+            SectionCard(LanguageText.text("settings.topic.location")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Tag detections with GPS", Modifier.weight(1f))
+                Text(LanguageText.text("ui.tag.detections.gps"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.tagLocation, { on -> vm.updateSettings { it.copy(tagLocation = on) } })
             }
-            Text(
-                "Stamps this phone’s position on each detection: Live detail, Moving with you, Debrief, and new log rows. " +
-                    "That is where you were, not a location from the other radio. " +
-                    "Use high-accuracy location, or the path stays empty. " +
-                    "Heard-here TAK pins need this. Remote ID uses the coordinates in the advertisement. " +
-                    "Turn this off to keep your position out of the logs.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Note(
+                LanguageText.text(
+                    "ui.stamps.phone.s.position",
+                    mapOf(
+                        "live" to LanguageText.text("tab.live"),
+                        "moving" to LanguageText.text("ui.moving.label"),
+                        "places" to LanguageText.text("ui.places.label"),
+                        "debrief" to LanguageText.text("reports.debrief"),
+                    ),
+                ),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Online place names and maps", Modifier.weight(1f))
+                Text(LanguageText.text("ui.places.label"), Modifier.weight(1f))
+                FieldwatchSwitch(settings.placeWatch, { on -> vm.updateSettings { it.copy(placeWatch = on) } })
+            }
+            Note(
+                LanguageText.text(
+                    "ui.finder.tag.keeps.its",
+                    mapOf("gps" to LanguageText.text("ui.tag.detections.gps")),
+                ),
+            )
+            }
+            SectionCard(LanguageText.text("settings.topic.maps")) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(LanguageText.text("ui.online.place.names.maps"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.onlineLookup, { on -> vm.updateSettings { it.copy(onlineLookup = on) } })
             }
+            Note(LanguageText.text("ui.internet.debrief.places.turn"))
+            val mapsOn = settings.onlineLookup
+            val open = mapMenu && mapsOn
+            ExposedDropdownMenuBox(
+                expanded = open,
+                onExpandedChange = { want ->
+                    if (mapsOn) {
+                        mapMenu = want
+                        if (want) positionMenu = false
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                FieldwatchDropdownField(
+                    label = LanguageText.text("settings.map.choice"),
+                    value = LanguageText.text(settings.mapBasemap.labelKey),
+                    expanded = open,
+                    enabled = mapsOn,
+                )
+                ExposedDropdownMenu(open, { mapMenu = false }) {
+                    MapBasemap.entries.filter { it.inPicker }.forEach { choice ->
+                        val selected = choice == settings.mapBasemap
+                        val subtitle = choice.subtitleKeys
+                            .joinToString(" · ") { LanguageText.text(it) }
+                            .ifBlank { null }
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 32.dp)
+                                .clickable {
+                                    mapMenu = false
+                                    if (choice != settings.mapBasemap) vm.selectMap(choice)
+                                }
+                                .padding(horizontal = 12.dp, vertical = if (subtitle == null) 2.dp else 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    LanguageText.text(choice.labelKey),
+                                    style = MaterialTheme.typography.labelLarge,
+                                )
+                                if (subtitle != null) {
+                                    Text(
+                                        subtitle,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            if (choice.needsKey) {
+                                Text(
+                                    LanguageText.text("map.key.mark"),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 8.dp),
+                                )
+                            }
+                            if (selected) {
+                                Icon(Icons.Outlined.Check, contentDescription = null)
+                            }
+                        }
+                    }
+                }
+            }
+            if (mapsOn && settings.mapBasemap.needsKey) {
+                val service = settings.mapBasemap.service
+                val stored = vm.mapKey(settings.mapBasemap)
+                var draft by remember(service) { mutableStateOf(stored) }
+                var skipFirstBlur by remember(service) { mutableStateOf(true) }
+                FieldwatchOutlinedField(
+                    value = draft,
+                    onValueChange = { next ->
+                        if (MapKey.verdict(next) == MapKey.Verdict.DENIED) {
+                            vm.finishMapKey(settings.mapBasemap, next)
+                        } else {
+                            draft = next
+                        }
+                    },
+                    label = LanguageText.text("map.key.label"),
+                    supportingText = LanguageText.text("map.key.hint"),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onDone = { vm.finishMapKey(settings.mapBasemap, draft) },
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { focus ->
+                            if (focus.isFocused) {
+                                skipFirstBlur = false
+                            } else if (skipFirstBlur) {
+                                skipFirstBlur = false
+                            } else {
+                                vm.finishMapKey(settings.mapBasemap, draft)
+                            }
+                        },
+                )
+            }
             Text(
-                "With internet, Debrief turns coordinates into a street and city, and Reports → Path loads a map under the trace. " +
-                    "Nothing is sent to a sw33p3r_ server. " +
-                    "Offline, Debrief keeps the coordinates and Path stays a plain trace. " +
-                    "Turn this off to leave streets and the map out.",
+                LanguageText.text("settings.map.about"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (!mapsOn) {
+                Text(
+                    LanguageText.text("settings.map.needs.online"),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Text(
+                LanguageText.text("settings.map.overlays"),
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            MapOverlay.entries.forEach { overlay ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+                        Text(
+                            LanguageText.text(overlay.basemap.labelKey),
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                        Text(
+                            LanguageText.text("map.united.states"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    FieldwatchSwitch(
+                        overlay in settings.mapOverlays,
+                        { on ->
+                            vm.updateSettings { current ->
+                                val next = if (on) current.mapOverlays + overlay else current.mapOverlays - overlay
+                                current.copy(mapOverlays = next)
+                            }
+                        },
+                        enabled = mapsOn,
+                    )
+                }
+            }
+            FieldwatchActionButton(onClick = { confirmClearMaps = true }) {
+                Text(LanguageText.text("settings.map.clear"))
+            }
+            Note(LanguageText.text("settings.map.clear.body"))
+            }
+            SectionCard(LanguageText.text("settings.layer.heading")) {
+            SensorLayerBlock(
+                title = LanguageText.text("settings.layer.flock"),
+                note = LanguageText.text("settings.layer.note"),
+                state = flock,
+                checked = settings.flockLayer,
+                onChecked = vm::setFlockLayer,
+                onUpdate = vm::updateFlockLayer,
+                more = if (!flock.fullList && flock.savedAt > 0L && !flock.busy) {
+                    LanguageText.text("settings.layer.more")
+                } else {
+                    null
+                },
+            ) {
+                SensorAlertRow(
+                    LanguageText.text("settings.layer.alert.plate"),
+                    settings.flockAlert,
+                    !flock.busy,
+                ) { on -> vm.updateSettings { it.copy(flockAlert = on) } }
+            }
+            Spacer(Modifier.height(8.dp))
+            SensorLayerBlock(
+                title = LanguageText.text("settings.layer.other"),
+                note = LanguageText.text("settings.layer.other.note"),
+                state = sensors,
+                checked = settings.sensorLayer,
+                onChecked = vm::setSensorLayer,
+                onUpdate = vm::updateSensorLayer,
+            ) {
+                SensorAlertRow(
+                    LanguageText.text("settings.layer.alert.speed"),
+                    settings.speedAlert,
+                    !sensors.busy,
+                ) { on -> vm.updateSettings { it.copy(speedAlert = on) } }
+                SensorAlertRow(
+                    LanguageText.text("settings.layer.alert.red"),
+                    settings.redAlert,
+                    !sensors.busy,
+                ) { on -> vm.updateSettings { it.copy(redAlert = on) } }
+                SensorAlertRow(
+                    LanguageText.text("settings.layer.alert.gun"),
+                    settings.gunshotAlert,
+                    !sensors.busy,
+                ) { on -> vm.updateSettings { it.copy(gunshotAlert = on) } }
+                SensorAlertRow(
+                    LanguageText.text("settings.layer.alert.camera"),
+                    settings.cameraAlert,
+                    !sensors.busy,
+                ) { on -> vm.updateSettings { it.copy(cameraAlert = on) } }
+            }
+            }
+            SectionCard(LanguageText.text("settings.map.display")) {
+            ExposedDropdownMenuBox(
+                expanded = positionMenu,
+                onExpandedChange = { want ->
+                    positionMenu = want
+                    if (want) mapMenu = false
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                FieldwatchDropdownField(
+                    label = LanguageText.text("settings.map.position"),
+                    value = LanguageText.text(settings.mapFooter.labelKey),
+                    expanded = positionMenu,
+                )
+                ExposedDropdownMenu(positionMenu, { positionMenu = false }) {
+                    MapFooter.entries.forEach { choice ->
+                        val selected = choice == settings.mapFooter
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 32.dp)
+                                .clickable {
+                                    positionMenu = false
+                                    if (choice != settings.mapFooter) {
+                                        vm.updateSettings { it.copy(mapFooter = choice) }
+                                    }
+                                }
+                                .padding(horizontal = 12.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                LanguageText.text(choice.labelKey),
+                                style = MaterialTheme.typography.labelLarge,
+                                modifier = Modifier.weight(1f),
+                            )
+                            if (selected) {
+                                Icon(Icons.Outlined.Check, contentDescription = null)
+                            }
+                        }
+                    }
+                }
+            }
+            Note(
+                LanguageText.text(
+                    "settings.map.position.about",
+                    mapOf(
+                        "gps" to LanguageText.text("map.position.gps"),
+                        "grid" to LanguageText.text("ui.grid"),
+                        "off" to LanguageText.text("ui.off.label"),
+                    ),
+                ),
+            )
+            }
             }
 
-            SectionCard("GNSS interference") {
+            if (topic == SettingsTopic.GNSS) {
+            SectionCard(LanguageText.text("settings.topic.gnss"), showTitle = false) {
+            Note(LanguageText.text("ui.detects.interference.spoofing.gnss"))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("GNSS interference check", Modifier.weight(1f))
+                Text(LanguageText.text("ui.gnss.interference.check"), Modifier.weight(1f))
                 FieldwatchSwitch(
                     checked = settings.gnssMonitor && gnssReady,
                     onCheckedChange = { on ->
@@ -444,35 +797,29 @@ fun SettingsScreen(
                     enabled = gnssReady && !gnssCal.running,
                 )
             }
-            Text(
-                "Detects interference and spoofing of GNSS (GPS) satellites. " +
-                    "Interference can also be caused by other nearby electronics, such as Wi-Fi routers. " +
-                    "sw33p3r_ cannot tell the source or the distance. " +
-                    "A hit already under way when the check starts can be missed. " +
-                    "A hit opens a popup. After you dismiss it, a red line stays on Live until it ends.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Note(LanguageText.text("ui.hit.opens.popup.after"))
             if (!gnssReady) {
                 Text(
-                    "Calibrate this phone before turning the check on.",
+                    LanguageText.text("ui.calibrate.phone.before.turning"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            }
+            SectionCard(LanguageText.text("gnss.section.calibration")) {
             FieldwatchActionButton(
                 onClick = { if (gnssCal.running) vm.stopGnssCalibration() else vm.startGnssCalibration() },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text(if (gnssCal.running) "Stop calibration" else "Calibrate this phone") }
-            Text(
-                "Stand outside, hold still, and stay away from a router. This takes about a minute. " +
-                    "The result stays on this phone until you calibrate again. It is not part of Export settings.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            ) { Text(if (gnssCal.running) LanguageText.text("ui.stop.calibration") else LanguageText.text("ui.calibrate.phone")) }
+            Note(
+                LanguageText.text(
+                    "ui.stand.outside.hold.still",
+                    mapOf("export" to LanguageText.text("ui.export.settings")),
+                ),
             )
             if (gnssCal.running) {
                 Text(
-                    "Calibrating… ${gnssCal.leftSec} s left",
+                    LanguageText.text("gnss.calibrating", mapOf("n" to gnssCal.leftSec.toString())),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
@@ -490,13 +837,11 @@ fun SettingsScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface,
                 )
-                Text(
-                    "Calibrated ${profile.calibratedLabel()}.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                Note(LanguageText.text("gnss.calibrated", mapOf("when" to profile.calibratedLabel())))
             }
-            Text("Sensitivity", style = MaterialTheme.typography.labelLarge)
+            }
+            SectionCard(LanguageText.text("trusted.warnings")) {
+            Text(LanguageText.text("ui.sensitivity.label"), style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GnssSensitivity.entries.forEach { item ->
                     FieldwatchFilterChip(
@@ -506,12 +851,8 @@ fun SettingsScreen(
                     )
                 }
             }
-            Text(
-                "Low waits for a deeper drop. High alerts on a smaller drop, including some routers.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text("Alert from", style = MaterialTheme.typography.labelLarge)
+            Note(LanguageText.text("ui.low.waits.deeper.drop"))
+            Text(LanguageText.text("ui.alert.label.2"), style = MaterialTheme.typography.labelLarge)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GnssAlertFloor.entries.forEach { item ->
                     FieldwatchFilterChip(
@@ -521,104 +862,156 @@ fun SettingsScreen(
                     )
                 }
             }
-            Text(
-                "The popup, red line, beep, and voice start at this level. A weaker hit still shows in Diagnostics and in the sit report.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Note(
+                LanguageText.text(
+                    "ui.popup.red.line.beep",
+                    mapOf("diag" to LanguageText.text("ui.diagnostics.label")),
+                ),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Spoofing checks", Modifier.weight(1f))
+                Text(LanguageText.text("ui.spoofing.checks"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.gnssSpoofChecks, { on -> vm.updateSettings { it.copy(gnssSpoofChecks = on) } })
             }
-            Text(
-                "Watches for gain falling while the signal holds or rises. A clock or position mismatch counts with that, or with another mismatch. One mismatch alone does not warn. A careful spoofer can still get past these checks.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Note(LanguageText.text("ui.warns.when.gain.falls"))
+            }
+            SectionCard(LanguageText.text("trusted.reach")) {
+            Note(
+                LanguageText.text(
+                    "gnss.reach.note",
+                    mapOf(
+                        "beep" to LanguageText.text("ui.beep.label"),
+                        "voice" to LanguageText.text("ui.voice.label"),
+                        "watchlist" to LanguageText.text("settings.topic.alerts"),
+                    ),
+                ),
             )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Beep", Modifier.weight(1f))
+                Text(LanguageText.text("ui.beep.label"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.gnssBeep, { on -> vm.updateSettings { it.copy(gnssBeep = on) } })
             }
-            Text(
-                "The same pip as a watchlist hit, on the media volume. The popup and the red line still show if this is off.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Note(LanguageText.text("ui.same.pip.watchlist.hit"))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Voice", Modifier.weight(1f))
+                Text(LanguageText.text("ui.voice.label"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.gnssVoice, { on -> vm.updateSettings { it.copy(gnssVoice = on) } })
             }
-            Text(
-                "Says possible GPS interference, or possible GPS spoofing. It speaks again only when the level goes up. Uses the media volume. Separate from the watchlist Voice switch.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Note(LanguageText.text("ui.says.possible.gps.interference"))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("System notification", Modifier.weight(1f))
+                Text(LanguageText.text("ui.system.notification"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.gnssShade, { on -> vm.updateSettings { it.copy(gnssShade = on) } })
             }
-            Text(
-                "A silent notification for this warning. The popup and the red line still show if this is off. Separate from the watchlist switch.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Note(LanguageText.text("ui.silent.notification.warning.popup"))
+            }
+            SectionCard(LanguageText.text("gnss.section.recording")) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Full tracking", Modifier.weight(1f))
+                Text(LanguageText.text("ui.record.raw.gnss.during"), Modifier.weight(1f))
+                FieldwatchSwitch(
+                    checked = settings.gnssRawLog,
+                    onCheckedChange = { on -> vm.updateSettings { it.copy(gnssRawLog = on) } },
+                    enabled = gnssReady && settings.gnssMonitor && !settings.demoMode && !gnssCal.running,
+                )
+            }
+            Note(
+                LanguageText.text(
+                    "ui.saves.phone.s.raw",
+                    mapOf("privacy" to LanguageText.text("ui.privacy.mode")),
+                ),
+            )
+            FieldwatchActionButton(
+                onClick = { gnssRecordings.firstOrNull()?.let { vm.shareGnssRecording(it.name) } },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = gnssRecordings.isNotEmpty(),
+            ) { Text(LanguageText.text("ui.share.last.recording")) }
+            if (gnssRecordings.size > 1) {
+                gnssRecordings.drop(1).forEach { recording ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            recording.label(),
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        TextButton(onClick = { vm.shareGnssRecording(recording.name) }) { Text(LanguageText.text("ui.share.label")) }
+                    }
+                }
+            }
+            }
+            SectionCard(LanguageText.text("gnss.section.receiver")) {
+            Note(LanguageText.text("gnss.receiver.note"))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(LanguageText.text("ui.full.tracking"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.gnssFullTracking, { on -> vm.updateSettings { it.copy(gnssFullTracking = on) } })
             }
-            Text(
-                "Keeps the GPS receiver awake instead of letting it rest. Uses more battery. Android 12 and newer. Older phones ignore this.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Note(LanguageText.text("ui.keeps.gps.receiver.awake"))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Fading-together check", Modifier.weight(1f))
+                Text(LanguageText.text("ui.fading.together.check"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.gnssCorrelation, { on -> vm.updateSettings { it.copy(gnssCorrelation = on) } })
             }
-            Text(
-                "Watches for satellites fading at the same time. A hand, a pocket, or getting in a car can do that. Leave this off unless you are testing it.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Note(LanguageText.text("ui.watches.satellites.fading.same"))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Invert gain", Modifier.weight(1f))
+                Text(LanguageText.text("ui.invert.gain"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.gnssInvertAgc, { on -> vm.updateSettings { it.copy(gnssInvertAgc = on) } })
             }
-            Text(
-                "A few phones report gain backwards. Turn this on only if a Wi-Fi router makes the AGC number in Diagnostics go up.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Note(
+                LanguageText.text(
+                    "ui.few.phones.report.gain",
+                    mapOf("diag" to LanguageText.text("ui.diagnostics.label")),
+                ),
             )
+            }
             }
 
-            SectionCard("TAK / CoT") {
+            if (topic == SettingsTopic.TRUSTED) {
+                TrustedNetworksPage(vm, settings)
+            }
+
+            if (topic == SettingsTopic.TRACKER) {
+                SectionCard(LanguageText.text("settings.topic.tracker"), showTitle = false) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(LanguageText.text("tracker.follow"), Modifier.weight(1f))
+                        FieldwatchSwitch(
+                            settings.trackerFollow,
+                            { on -> vm.updateSettings { it.copy(trackerFollow = on) } },
+                        )
+                    }
+                    Note(LanguageText.text("tracker.follow.note"))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(LanguageText.text("tracker.places"), Modifier.weight(1f))
+                        FieldwatchSwitch(
+                            settings.trackerPlaces,
+                            { on -> vm.updateSettings { it.copy(trackerPlaces = on) } },
+                        )
+                    }
+                    Note(LanguageText.text("tracker.places.note"))
+                }
+            }
+
+            if (topic == SettingsTopic.TAK) {
+            SectionCard(LanguageText.text("settings.topic.tak"), showTitle = false) {
+            Note(
+                LanguageText.text(
+                    "ui.radios.hear.pinned.phone",
+                    mapOf("privacy" to LanguageText.text("ui.privacy.mode")),
+                ),
+            )
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("TAK / CoT feed", Modifier.weight(1f))
+                Text(LanguageText.text("ui.tak.cot.feed"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.takEnabled, { on -> vm.updateSettings { it.copy(takEnabled = on) } })
             }
-            Text(
-                "Sends map markers to ATAK, WinTAK, or iTAK. " +
-                    "Radios you hear are pinned at this phone’s GPS, at the loudest point, and labeled (here). " +
-                    "Walking away does not move the pin. A louder detection does. " +
-                    "Remote ID aircraft use the coordinates in the advertisement, and a pilot location is a second pin. " +
-                    "A radio that leaves is removed. Tap a marker for the name, MAC, and signal. " +
-                    "This is not direction finding. Privacy mode pauses the feed.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
             if (settings.takEnabled && settings.demoMode) {
                 Text(
-                    "Privacy mode is on, so the feed is paused. Turn Privacy mode off to send markers.",
+                    LanguageText.text("ui.privacy.mode.so.feed"),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
+            }
             if (settings.takEnabled) {
-                TakFeedSettings(settings, vm, state.takStatus)
+                TakFeedSettings(settings, vm, state.takStatus, state.takInstallTag)
             }
             }
 
-            SectionCard("sw33p3r_ Station") {
+            if (topic == SettingsTopic.STATION) {
+            SectionCard("sw33p3r_ Station", showTitle = false) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Station feed", Modifier.weight(1f))
                 FieldwatchSwitch(settings.stationEnabled, { on -> vm.updateSettings { it.copy(stationEnabled = on) } })
@@ -635,23 +1028,25 @@ fun SettingsScreen(
                 StationFeedSettings(settings, vm)
             }
             }
+            }
 
-            SectionCard("Logging") {
+            if (topic == SettingsTopic.LOGGING) {
+            SectionCard(LanguageText.text("settings.topic.logging"), showTitle = false) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Write detections to disk", Modifier.weight(1f))
+                Text(LanguageText.text("ui.write.detections.disk"), Modifier.weight(1f))
                 FieldwatchSwitch(settings.loggingEnabled, { on -> vm.updateSettings { it.copy(loggingEnabled = on) } })
             }
             StableCaption(
                 if (settings.loggingEnabled) {
-                    "Logging is on. New detections are added to the file."
+                    LanguageText.text("ui.logging.new.detections.added")
                 } else {
-                    "Logging is off. Scanning still runs. Nothing new is written until you turn this on."
+                    LanguageText.text("ui.logging.off.scanning.still")
                 },
-                "Logging is on. New detections are added to the file.",
-                "Logging is off. Scanning still runs. Nothing new is written until you turn this on.",
+                LanguageText.text("ui.logging.new.detections.added"),
+                LanguageText.text("ui.logging.off.scanning.still"),
             )
             Text(
-                "The file on disk is one detection per line. Reports → Log can share or save CSV, JSON, GPX, KML, or WiGLE.",
+                LanguageText.text("ui.file.disk.one.detection"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -673,12 +1068,17 @@ fun SettingsScreen(
                 },
                 valueRange = 128f..4096f,
             )
+            Text(
+                LanguageText.text("ui.when.log.file.reaches"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             var staleDrag by remember { mutableIntStateOf(settings.staleSec) }
             var staleDragging by remember { mutableStateOf(false) }
             LaunchedEffect(settings.staleSec) {
                 if (!staleDragging) staleDrag = settings.staleSec
             }
-            Text("Stale after ${staleDrag}s")
+            Text(LanguageText.text("settings.stale", mapOf("n" to staleDrag.toString())))
             FieldwatchSlider(
                 value = staleDrag.toFloat(),
                 onValueChange = {
@@ -691,93 +1091,112 @@ fun SettingsScreen(
                 },
                 valueRange = 15f..180f,
             )
+            Text(
+                LanguageText.text("ui.radio.marked.gone.live"),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             StickyHeight("log-stats") {
                 Text(
-                    "${state.logLines} lines this session  ·  ${vm.logBytes() / 1024} KB on disk. " +
-                        "Share, Save, and Reset / clear log are on the Reports tab.",
+                    LanguageText.text(
+                        "reports.log",
+                        mapOf(
+                            "n" to state.logLines.toString(),
+                            "kb" to (vm.logBytes() / 1024).toString(),
+                        ),
+                    ) + ". " + LanguageText.text("ui.share.save.reset.clear"),
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             }
+            }
 
-            SectionCard("Signatures") {
+            if (topic == SettingsTopic.SIGNATURES) {
+            SectionCard(LanguageText.text("settings.topic.signatures"), showTitle = false) {
             Text(
-                "Export the catalog (stock plus any you added or edited) to share with another sw33p3r_ or as a backup. Import adds new rows and extra rules; it does not delete anything. Same id or the same match rules are skipped so a pack can be imported twice. Import signatures from a file to add a catalog received out of band. Restore defaults below still wipes customs.",
+                LanguageText.text("ui.export.shares.catalog.including"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             FieldwatchActionButton(
                 onClick = vm::startSignatureShare,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Export signatures") }
+            ) { Text(LanguageText.text("ui.export.signatures")) }
             FieldwatchActionButton(
                 onClick = { saveSignatures.launch(vm.suggestedSignaturesName()) },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Save signatures to SD card / storage…") }
+            ) { Text(LanguageText.text("ui.save.signatures.sd.card")) }
             FieldwatchActionButton(
                 onClick = {
                     importSignatures.launch(arrayOf("application/json", "text/plain", "*/*"))
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Import signatures…") }
+            ) { Text(LanguageText.text("ui.import.signatures")) }
             FieldwatchActionButton(
                 onClick = { confirmRestore = true },
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text("Restore default signatures & presets")
+                Text(LanguageText.text("ui.restore.default.signatures.presets"))
+            }
             }
             }
 
-            SectionCard("Settings backup") {
+            if (topic == SettingsTopic.LANGUAGE) {
+                LanguagePage(
+                    state = language,
+                    onChoose = vm::chooseLanguage,
+                    onImport = { importLanguage.launch(arrayOf("application/json", "text/plain", "*/*")) },
+                    onExport = vm::startLanguageTemplateShare,
+                    onRemove = vm::removeLanguagePack,
+                )
+            }
+            if (topic == SettingsTopic.BACKUP) {
+            SectionCard(LanguageText.text("settings.topic.backup"), showTitle = false) {
             Text(
-                "Saves switches, filters, presets, named radios, and signature watches. Not the catalog, and not logs. " +
-                    "The catalog is Export signatures, above. Import replaces those items on this phone and leaves the catalog. " +
-                    "Fieldwatch asks before a file turns the TAK feed on or changes where it sends.",
+                (LanguageText.text("ui.saves.switches.filters.presets") + " ") +
+                    (LanguageText.text("ui.catalog.signatures.import.replaces") + " ") +
+                    LanguageText.text("ui.fieldwatch.asks.before.file"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             FieldwatchActionButton(
                 onClick = vm::startSettingsShare,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Export settings") }
+            ) { Text(LanguageText.text("ui.export.settings")) }
             FieldwatchActionButton(
                 onClick = { saveSettings.launch(vm.suggestedSettingsName()) },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Save settings to SD card / storage…") }
+            ) { Text(LanguageText.text("ui.save.settings.sd.card")) }
             FieldwatchActionButton(
                 onClick = {
                     importSettings.launch(arrayOf("application/json", "text/plain", "*/*"))
                 },
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Import settings…") }
+            ) { Text(LanguageText.text("ui.import.settings")) }
+            }
             }
 
+            if (topic == null) {
             FieldwatchActionButton(
                 onClick = onShowLiveTour,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Show Live tour") }
+            ) { Text(LanguageText.text("ui.show.live.tour")) }
             Text(
-                "Shows the Live tour again: display, pause, filters, signatures, reports, and settings.",
+                LanguageText.text("ui.shows.live.tour.again"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             FieldwatchActionButton(
                 onClick = onScanStatus,
                 modifier = Modifier.fillMaxWidth(),
-            ) { Text("Diagnostics") }
+            ) { Text(LanguageText.text("ui.diagnostics.label")) }
             Text(
-                "Phone, Android version, the scan switches, and whether Wi-Fi, Bluetooth, and Location are on. Copy pastes that into an issue. Network names and GPS coordinates are left out.",
+                LanguageText.text("ui.shows.whether.scanning.running"),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-
             Text(
                 "sw33p3r_ ${app.fieldwatch.BuildConfig.VERSION_NAME}  ·  Catalog ${state.catalogVersion}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                "Wi-Fi and Bluetooth only. Android does not show phones that are only connected to an access point. Fieldwatch sees access points and Bluetooth advertisers.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -792,7 +1211,7 @@ fun SettingsScreen(
             }
             Text(
                 if (ipv4.isEmpty()) {
-                    "This phone’s IPv4  ·  none"
+                    LanguageText.text("ui.phone.s.ipv4.none")
                 } else {
                     "This phone’s IPv4  ·  ${ipv4.joinToString("  ·  ")}"
                 },
@@ -802,30 +1221,85 @@ fun SettingsScreen(
             Spacer(Modifier.height(24.dp))
             HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))
             CreditFooter()
+            }
         }
     }
     pendingSettingsImport?.let { pending ->
         AlertDialog(
             onDismissRequest = vm::dismissPendingSettingsImport,
-            title = { Text("Import settings?") },
+            title = { Text(LanguageText.text("ui.import.settings.2")) },
             text = { Text(pending.message) },
             confirmButton = {
-                TextButton(onClick = vm::confirmPendingSettingsImport) { Text("Import") }
+                TextButton(onClick = vm::confirmPendingSettingsImport) { Text(LanguageText.text("language.import.action")) }
             },
             dismissButton = {
-                TextButton(onClick = vm::dismissPendingSettingsImport) { Text("Cancel") }
+                TextButton(onClick = vm::dismissPendingSettingsImport) { Text(LanguageText.text("language.cancel")) }
+            },
+        )
+    }
+    if (confirmClearMaps) {
+        AlertDialog(
+            onDismissRequest = { confirmClearMaps = false },
+            title = { Text(LanguageText.text("settings.map.clear")) },
+            text = { Text(LanguageText.text("settings.map.clear.body")) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmClearMaps = false
+                        vm.clearSavedMaps()
+                    },
+                ) { Text(LanguageText.text("settings.map.clear")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmClearMaps = false }) {
+                    Text(LanguageText.text("language.cancel"))
+                }
+            },
+        )
+    }
+    if (flock.confirm) {
+        AlertDialog(
+            onDismissRequest = vm::dismissFlockDownload,
+            title = { Text(LanguageText.text("settings.layer.download.title")) },
+            text = { Text(LanguageText.text("settings.layer.download.body")) },
+            confirmButton = {
+                TextButton(onClick = vm::confirmFlockDownload) {
+                    Text(LanguageText.text("settings.layer.download.action"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = vm::dismissFlockDownload) {
+                    Text(LanguageText.text("language.cancel"))
+                }
+            },
+        )
+    }
+    if (sensors.confirm) {
+        AlertDialog(
+            onDismissRequest = vm::dismissSensorDownload,
+            title = { Text(LanguageText.text("settings.layer.other.download.title")) },
+            text = { Text(LanguageText.text("settings.layer.other.download.body")) },
+            confirmButton = {
+                TextButton(onClick = vm::confirmSensorDownload) {
+                    Text(LanguageText.text("settings.layer.download.action"))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = vm::dismissSensorDownload) {
+                    Text(LanguageText.text("language.cancel"))
+                }
             },
         )
     }
     if (confirmRestore) {
         AlertDialog(
             onDismissRequest = { confirmRestore = false },
-            title = { Text("Restore defaults?") },
+            title = { Text(LanguageText.text("ui.restore.defaults")) },
             text = {
                 Text(
-                    "Replaces the stock catalog, colors, stock bookmarks, stock filters, and the default switches. " +
-                        "Signatures and filters you added are deleted. Export those first if you want a backup. " +
-                        "This cannot be undone.",
+                    (LanguageText.text("ui.replaces.stock.catalog.colors") + " ") +
+                        (LanguageText.text("ui.signatures.filters.added.deleted") + " ") +
+                        LanguageText.text("ui.cannot.undone"),
                 )
             },
             confirmButton = {
@@ -834,12 +1308,271 @@ fun SettingsScreen(
                         confirmRestore = false
                         vm.restoreDefaults()
                     },
-                ) { Text("Restore") }
+                ) { Text(LanguageText.text("ui.restore.label")) }
             },
             dismissButton = {
-                TextButton(onClick = { confirmRestore = false }) { Text("Cancel") }
+                TextButton(onClick = { confirmRestore = false }) { Text(LanguageText.text("language.cancel")) }
             },
         )
+    }
+}
+
+@Composable
+private fun Note(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun SensorLayerBlock(
+    title: String,
+    note: String,
+    state: FlockLayerUi,
+    checked: Boolean,
+    onChecked: (Boolean) -> Unit,
+    onUpdate: () -> Unit,
+    more: String? = null,
+    alerts: @Composable () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(vertical = 4.dp)) {
+            Text(title, style = MaterialTheme.typography.labelLarge)
+            Text(
+                note,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val status = when {
+                state.busy && state.processing -> LanguageText.text("settings.layer.processing")
+                state.busy -> LanguageText.text(
+                    "settings.layer.downloading",
+                    mapOf("n" to state.percent.coerceIn(0, 99).toString()),
+                )
+                state.savedAt > 0L -> {
+                    val date = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM)
+                        .format(java.util.Date(state.savedAt))
+                    LanguageText.text("settings.layer.saved", mapOf("date" to date))
+                }
+                else -> null
+            }
+            if (status != null) {
+                Text(
+                    status,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (more != null) {
+                Text(
+                    more,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            val notice = state.noticeKey
+            if (notice != null) {
+                val line = if (state.noticeCode.isEmpty()) {
+                    LanguageText.text(notice)
+                } else {
+                    LanguageText.text(notice, mapOf("code" to state.noticeCode))
+                }
+                Text(
+                    line,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (state.noticeKeep) {
+                    Text(
+                        LanguageText.text("settings.layer.failed.unchanged"),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        FieldwatchSwitch(checked, onChecked, enabled = !state.busy)
+    }
+    if (checked && state.savedAt > 0L) {
+        FieldwatchActionButton(onClick = onUpdate, enabled = !state.busy) {
+            Text(LanguageText.text("settings.layer.update"))
+        }
+    }
+    if (checked) {
+        Text(
+            LanguageText.text("settings.layer.alerts"),
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        alerts()
+    }
+}
+
+@Composable
+private fun SensorAlertRow(
+    label: String,
+    on: Boolean,
+    enabled: Boolean,
+    set: (Boolean) -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            label,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.labelLarge,
+        )
+        FieldwatchSwitch(on, set, enabled = enabled)
+    }
+}
+
+private enum class SettingsTopic(val titleKey: String) {
+    APPEARANCE("settings.topic.appearance"),
+    SCANNING("settings.topic.scanning"),
+    WATCHLIST("settings.topic.alerts"),
+    LOCATION("settings.topic.location.maps"),
+    GNSS("settings.topic.gnss"),
+    CELL("settings.topic.cell"),
+    TRUSTED("settings.topic.trusted"),
+    TRACKER("settings.topic.tracker"),
+    TAK("settings.topic.tak"),
+    STATION("settings.topic.station"),
+    LOGGING("settings.topic.logging"),
+    SIGNATURES("settings.topic.signatures"),
+    LANGUAGE("settings.topic.language"),
+    BACKUP("settings.topic.backup"),
+    ;
+
+    fun title(): String = LanguageText.text(titleKey)
+}
+
+@Composable
+private fun SettingsTopicList(
+    settings: AppSettings,
+    catalogVersion: Int,
+    takInstallTag: String,
+    gnssReady: Boolean,
+    languageName: String,
+    namedRadioCount: Int,
+    onNamedRadios: () -> Unit,
+    onOpen: (SettingsTopic) -> Unit,
+) {
+    val scanLabel = when (settings.intensity) {
+        ScanIntensity.SAVER -> LanguageText.text("ui.battery.saver")
+        ScanIntensity.BALANCED -> LanguageText.text("ui.balanced.label")
+        ScanIntensity.PERFORMANCE -> LanguageText.text("ui.high.performance")
+    }
+    fun onOff(on: Boolean) = if (on) "on" else "off"
+    val rows: List<Pair<SettingsTopic, String>> = listOf(
+        SettingsTopic.APPEARANCE to "Night ${onOff(settings.nightMode)} · Privacy ${onOff(settings.demoMode)}",
+        SettingsTopic.LANGUAGE to languageName,
+        SettingsTopic.SCANNING to scanLabel,
+        SettingsTopic.WATCHLIST to "Alerts ${onOff(settings.alertsEnabled)}",
+        SettingsTopic.LOCATION to "GPS ${onOff(settings.tagLocation)} · Places ${onOff(settings.placeWatch)}",
+        SettingsTopic.GNSS to when {
+            !gnssReady -> LanguageText.text("ui.needs.calibration")
+            settings.gnssMonitor -> LanguageText.text("ui.on.label")
+            else -> LanguageText.text("ui.off.label")
+        },
+        SettingsTopic.CELL to if (settings.cellWatch) {
+            LanguageText.text("ui.on.label")
+        } else {
+            LanguageText.text("ui.off.label")
+        },
+        SettingsTopic.TRUSTED to if (settings.trustedWatch) {
+            LanguageText.text("ui.on.label")
+        } else {
+            LanguageText.text("ui.off.label")
+        },
+        SettingsTopic.TRACKER to if (settings.trackerFollow || settings.trackerPlaces) {
+            LanguageText.text("ui.on.label")
+        } else {
+            LanguageText.text("ui.off.label")
+        },
+        SettingsTopic.TAK to when {
+            settings.takEnabled && settings.demoMode -> LanguageText.text("ui.paused.label")
+            settings.takEnabled -> "On · ${TakInstall.callsign(settings.takCallsign, takInstallTag)}"
+            else -> LanguageText.text("ui.off.label")
+        },
+        SettingsTopic.STATION to when {
+            settings.stationEnabled && settings.demoMode -> "Paused"
+            settings.stationEnabled -> "On"
+            else -> "Off"
+        },
+        SettingsTopic.LOGGING to if (settings.loggingEnabled) LanguageText.text("ui.on.label") else LanguageText.text("ui.off.label"),
+        SettingsTopic.SIGNATURES to "Catalog $catalogVersion",
+        SettingsTopic.BACKUP to LanguageText.text("ui.export.import"),
+    )
+    rows.forEach { (item, value) ->
+        SettingsTopicRow(item.title(), value) { onOpen(item) }
+        if (item == SettingsTopic.WATCHLIST) {
+            SettingsTopicRow(
+                LanguageText.text("settings.named.radios"),
+                namedRadiosValue(namedRadioCount),
+                onNamedRadios,
+            )
+        }
+    }
+}
+
+@Composable
+private fun namedRadiosValue(count: Int): String = when (count) {
+    0 -> LanguageText.text("display.none")
+    1 -> LanguageText.text("ui.1.radio")
+    else -> "$count radios"
+}
+
+@Composable
+private fun spokenNamesValue(settings: AppSettings): String {
+    val count = settings.spokenNames.size
+    return buildString {
+        append(
+            when (count) {
+                0 -> LanguageText.text("display.none")
+                1 -> LanguageText.text("spoken.one")
+                else -> LanguageText.text("spoken.count", mapOf("n" to count.toString()))
+            },
+        )
+        if (count > 0 && settings.alertVoiceWhat == AlertVoiceWhat.CLASS) {
+            append(" · ")
+            append(LanguageText.text("spoken.held"))
+        }
+    }
+}
+
+@Composable
+private fun SettingsTopicRow(title: String, value: String, onClick: () -> Unit) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 1.dp,
+    ) {
+        Row(
+            Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    value,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Icon(
+                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -863,14 +1596,44 @@ private fun CreditFooter() {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, status: TakFeedStatus) {
+private fun TakFeedSettings(
+    settings: AppSettings,
+    vm: FieldwatchViewModel,
+    status: TakFeedStatus,
+    installTag: String,
+) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     var hostText by remember { mutableStateOf(settings.takHost) }
     var portText by remember { mutableStateOf(settings.takPort.toString()) }
     LaunchedEffect(settings.takHost) { hostText = settings.takHost }
     LaunchedEffect(settings.takPort) { portText = settings.takPort.toString() }
     val preset = TakPublish.udpPreset(settings.takHost, settings.takPort)
-    Text("Destination", style = MaterialTheme.typography.labelLarge)
+    val phoneName = TakInstall.callsign(settings.takCallsign, installTag)
+    var callsignText by remember { mutableStateOf(settings.takCallsign) }
+    LaunchedEffect(settings.takCallsign) { callsignText = settings.takCallsign }
+    SectionCard(LanguageText.text("ui.phone.label")) {
+    FieldwatchOutlinedField(
+        value = callsignText,
+        onValueChange = { value ->
+            val next = TakInstall.storedCallsign(value)
+            callsignText = next
+            vm.updateSettings { it.copy(takCallsign = next) }
+        },
+        label = LanguageText.text("ui.tak.callsign"),
+        placeholder = phoneName,
+        supportingText = LanguageText.text("ui.tak.callsign.note", mapOf("name" to phoneName)),
+        enabled = !settings.demoMode,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(LanguageText.text("ui.tak.tag") + "  " + installTag, Modifier.weight(1f))
+        TextButton(
+            onClick = vm::regenerateTakTag,
+            enabled = !settings.demoMode && installTag.isNotEmpty(),
+        ) { Text(LanguageText.text("ui.new.tag")) }
+    }
+    Note(LanguageText.text("ui.each.phone.has.its"))
+    }
+    SectionCard(LanguageText.text("ui.destination.label")) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FieldwatchFilterChip(
             selected = preset == TakUdpPreset.THIS_PHONE,
@@ -879,7 +1642,7 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
                 vm.updateSettings { it.copy(takHost = host, takPort = port) }
             },
             enabled = !settings.demoMode,
-            label = { Text("This phone") },
+            label = { Text(LanguageText.text("ui.phone.label")) },
         )
         FieldwatchFilterChip(
             selected = preset == TakUdpPreset.LAN_MULTICAST,
@@ -888,7 +1651,7 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
                 vm.updateSettings { it.copy(takHost = host, takPort = port) }
             },
             enabled = !settings.demoMode,
-            label = { Text("LAN multicast") },
+            label = { Text(LanguageText.text("ui.lan.multicast")) },
         )
         FieldwatchFilterChip(
             selected = preset == TakUdpPreset.CUSTOM,
@@ -899,16 +1662,19 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
                 }
             },
             enabled = !settings.demoMode,
-            label = { Text("Custom") },
+            label = { Text(LanguageText.text("ui.custom.label")) },
         )
     }
-    Text(
-        "This phone is ATAK on this handset, at ${TakDefaults.LOOPBACK}:${TakDefaults.PORT}. " +
-            "LAN multicast is ${TakDefaults.SA_HOST}:${TakDefaults.SA_PORT}, for other ATAK apps on this Wi-Fi. " +
-            "Custom is one address. UDP only. A TAK server on TCP 8087 is not this feed. " +
-            "If This phone shows no pins, use Custom with the Wi-Fi address at the bottom of Settings and port ${TakDefaults.PORT}.",
-        style = MaterialTheme.typography.bodySmall,
-        color = muted,
+    Note(
+        LanguageText.text(
+            "ui.custom.one.address.udp",
+            mapOf(
+                "loop" to TakDefaults.LOOPBACK,
+                "port" to TakDefaults.PORT.toString(),
+                "multi" to TakDefaults.SA_HOST,
+                "mport" to TakDefaults.SA_PORT.toString(),
+            ),
+        ),
     )
     FieldwatchOutlinedField(
         value = hostText,
@@ -919,7 +1685,7 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
                 vm.updateSettings { it.copy(takHost = trimmed) }
             }
         },
-        label = "Host",
+        label = LanguageText.text("ui.host.label"),
         placeholder = TakDefaults.HOST,
         enabled = !settings.demoMode,
     )
@@ -934,50 +1700,70 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
                 }
             }
         },
-        label = "Port",
+        label = LanguageText.text("ui.port.label"),
         placeholder = TakDefaults.PORT.toString(),
-        supportingText = "UDP. This phone uses ${TakDefaults.PORT}. LAN multicast uses ${TakDefaults.SA_PORT}. Not TCP 8087.",
+        supportingText = LanguageText.text(
+            "ui.tak.port.note",
+            mapOf(
+                "port" to TakDefaults.PORT.toString(),
+                "mport" to TakDefaults.SA_PORT.toString(),
+            ),
+        ),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         enabled = !settings.demoMode,
     )
     Text(takStatusLine(status), style = MaterialTheme.typography.bodySmall, color = muted)
-    Text("What to send", style = MaterialTheme.typography.labelLarge)
+    }
+    SectionCard(LanguageText.text("ui.what.send")) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FieldwatchFilterChip(
             selected = settings.takAttention,
             onClick = { vm.updateSettings { it.copy(takAttention = !it.takAttention) } },
             enabled = !settings.demoMode,
-            label = { Text("Extra attention") },
+            label = { Text(LanguageText.text("chrome.extra.attention")) },
         )
         FieldwatchFilterChip(
             selected = settings.takPayloadFix,
             onClick = { vm.updateSettings { it.copy(takPayloadFix = !it.takPayloadFix) } },
             enabled = !settings.demoMode,
-            label = { Text("Payload location") },
+            label = { Text(LanguageText.text("ui.payload.location")) },
         )
         FieldwatchFilterChip(
             selected = settings.takWatchlist,
             onClick = { vm.updateSettings { it.copy(takWatchlist = !it.takWatchlist) } },
             enabled = !settings.demoMode,
-            label = { Text("Watchlist") },
+            label = { Text(LanguageText.text("settings.topic.watchlist")) },
         )
         FieldwatchFilterChip(
             selected = settings.takAllSignatures,
             onClick = { vm.updateSettings { it.copy(takAllSignatures = !it.takAllSignatures) } },
             enabled = !settings.demoMode,
-            label = { Text("All signatures") },
+            label = { Text(LanguageText.text("ui.all.signatures")) },
         )
     }
-    Text(
-        "Turn on any combination. Extra attention sends body cameras, glasses, recorders, pentest gear, and public-safety access points. " +
-            "Payload location sends Remote ID and any radio that advertises its own coordinates. " +
-            "Watchlist sends bookmarked signatures and named radios with Alert on. " +
-            "All signatures sends every labeled radio, which is noisy in a crowd. " +
-            "Unmatched radios are never sent. A pin needs coordinates, from the advertisement or from Tag detections with GPS.",
-        style = MaterialTheme.typography.bodySmall,
-        color = muted,
+    Note(
+        LanguageText.text(
+            "ui.turn.any.combination.extra",
+            mapOf("gps" to LanguageText.text("ui.tag.detections.gps")),
+        ),
     )
-    Text("GNSS", style = MaterialTheme.typography.labelLarge)
+    Note(LanguageText.text("ui.remote.id.aircraft.use"))
+    }
+    SectionCard(LanguageText.text("ui.how.long.spot.stays"), showTitle = false) {
+    Text(LanguageText.text("ui.how.long.spot.stays"), style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TakGnssHold.entries.forEach { item ->
+            FieldwatchFilterChip(
+                selected = settings.takRadioHold == item,
+                onClick = { vm.updateSettings { it.copy(takRadioHold = item) } },
+                enabled = !settings.demoMode,
+                label = { Text(item.label()) },
+            )
+        }
+    }
+    Note(LanguageText.text("ui.after.radio.leaves.spot"))
+    }
+    SectionCard(LanguageText.text("ui.gnss.warnings")) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TakGnssSend.entries.forEach { item ->
             FieldwatchFilterChip(
@@ -988,15 +1774,55 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
             )
         }
     }
-    Text(
-        "One line on this phone’s Fieldwatch marker. Not its own pin, and it does not say where the interference is. " +
-            "Off sends nothing. While alerting sends during a hit at or above Alert from. " +
-            "Red line also sends for the 10 minutes after. Any hit also sends a Low detection that never shows the red line. " +
-            "This phone needs a GPS fix.",
-        style = MaterialTheme.typography.bodySmall,
-        color = muted,
+    Note(
+        LanguageText.text(
+            "ui.mark.map.where.phone",
+            mapOf("level" to LanguageText.text("ui.alert.label.2")),
+        ),
     )
-    Text("Floods", style = MaterialTheme.typography.labelLarge)
+    Text(LanguageText.text("ui.how.long.mark.stays"), style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TakGnssHold.entries.forEach { item ->
+            FieldwatchFilterChip(
+                selected = settings.takGnssHold == item,
+                onClick = { vm.updateSettings { it.copy(takGnssHold = item) } },
+                enabled = !settings.demoMode && settings.takGnss != TakGnssSend.OFF,
+                label = { Text(item.label()) },
+            )
+        }
+    }
+    Note(LanguageText.text("ui.time.starts.last.update"))
+    }
+    val trustedOn = settings.trustedWatch && !settings.demoMode
+    SectionCard(LanguageText.text("trusted.tak")) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(LanguageText.text("trusted.tak"), Modifier.weight(1f))
+        FieldwatchSwitch(
+            settings.trustedTak,
+            { on -> vm.updateSettings { it.copy(trustedTak = on) } },
+            enabled = trustedOn,
+        )
+    }
+    Note(LanguageText.text("ui.tak.trusted.note"))
+    Text(LanguageText.text("trusted.stale"), style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TakGnssHold.entries.forEach { item ->
+            FieldwatchFilterChip(
+                selected = settings.trustedTakHold == item,
+                onClick = { vm.updateSettings { it.copy(trustedTakHold = item) } },
+                enabled = trustedOn,
+                label = { Text(item.label()) },
+            )
+        }
+    }
+    Note(
+        LanguageText.text(
+            "ui.tak.trusted.hold",
+            mapOf("pin" to LanguageText.text("trusted.tak")),
+        ),
+    )
+    }
+    SectionCard(LanguageText.text("ui.floods.label")) {
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         TakFloodSend.entries.forEach { item ->
             FieldwatchFilterChip(
@@ -1007,19 +1833,13 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
             )
         }
     }
-    Text(
-        "Adds a note to this phone’s Fieldwatch marker when a flood is detected, until the flood ends. Not its own pin. " +
-            "This does not change the red line on Live. A store full of radios advertising pairing can cause this. " +
-            "The note does not say it was one radio, and it does not name a tool. This phone needs a GPS fix.",
-        style = MaterialTheme.typography.bodySmall,
-        color = muted,
-    )
+    Note(LanguageText.text("ui.adds.note.phone.s"))
+    }
 }
 
-@Composable
 private fun StationFeedSettings(settings: AppSettings, vm: FieldwatchViewModel) {
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    val status by vm.stationStatus.collectAsState()
+    val status by vm.stationStatus.collectAsStateWithLifecycle()
     var urlText by remember { mutableStateOf(settings.stationUrl) }
     var idText by remember { mutableStateOf(settings.stationSensorId) }
     LaunchedEffect(settings.stationUrl) { urlText = settings.stationUrl }
@@ -1059,24 +1879,25 @@ private fun stationStatusLine(status: app.fieldwatch.radio.StationFeedStatus): S
 }
 
 private fun takStatusLine(status: TakFeedStatus): String {
-    if (status.paused) return "Feed status  ·  paused (Privacy mode)"
+    if (status.paused) return LanguageText.text("ui.feed.status.paused.privacy")
     if (status.error != null) {
         val whenAt = takStatusWhen(status.at)
-        return "Feed status  ·  error: ${status.error}" + if (whenAt.isNotEmpty()) "  ·  $whenAt" else ""
+        return LanguageText.text("ui.feed.status") + "  ·  error: ${status.error}" +
+            if (whenAt.isNotEmpty()) "  ·  $whenAt" else ""
     }
     if (status.at <= 0L) {
-        return "Feed status  ·  no send yet this session"
+        return LanguageText.text("ui.feed.status.no.send")
     }
     val bits = ArrayList<String>(5)
-    bits += "on the feed ${status.onFeed}"
-    bits += "sent ${status.sent}"
+    bits += LanguageText.text("ui.feed.on", mapOf("n" to status.onFeed.toString()))
+    bits += LanguageText.text("ui.feed.sent", mapOf("n" to status.sent.toString()))
     if (status.gone > 0) {
-        bits += if (status.gone == 1) "1 gone" else "${status.gone} gone"
+        bits += LanguageText.text("ui.n.gone", mapOf("n" to status.gone.toString()))
     }
     if (status.dest.isNotBlank()) bits += status.dest
     val whenAt = takStatusWhen(status.at)
     if (whenAt.isNotEmpty()) bits += whenAt
-    val head = "Feed status  ·  ${bits.joinToString("  ·  ")}"
+    val head = LanguageText.text("ui.feed.status") + "  ·  ${bits.joinToString("  ·  ")}"
     return if (status.detail.isNotBlank() && status.sent == 0 && status.gone == 0) {
         "$head  ·  ${status.detail}"
     } else {

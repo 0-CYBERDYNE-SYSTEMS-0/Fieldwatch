@@ -394,6 +394,8 @@ class SitTest {
             """{"format":"fieldwatch-sit","formatVersion":1,"summary":{"id":"a","name":"lot","startAt":1000}}""",
         )
         assertTrue(legacy.floods.isEmpty())
+        assertTrue(legacy.pathCameras.isEmpty())
+        assertNull(legacy.cameraKept)
         val session = SitSession.start(
             name = "lot",
             now = 1_000L,
@@ -429,6 +431,26 @@ class SitTest {
         session.noteFloods(listOf(FloodBurst(60_000L, popupCount = 6, nameCount = 0)))
         assertEquals(40, session.snapshot().floods.size)
         assertTrue(session.snapshot().floods.none { it.at == 60_000L })
+    }
+
+    @Test
+    fun oldSitRadioJsonLeavesTheReadStampOff() {
+        val json = Json { ignoreUnknownKeys = true }
+        val row = json.decodeFromString<SitRadio>(
+            """{"key":"BLE:AA:BB:CC:DD:EE:02","kind":"BLE","mac":"AA:BB:CC:DD:EE:02","name":"","fleetIds":[],"firstSeen":1,"lastSeen":2,"hitCount":1,"rssi":-50,"rssiMin":-50,"rssiMax":-50,"payloadLat":40.0,"payloadLon":-74.0}""",
+        )
+        assertEquals(40.0, row.payloadLat!!, 0.0)
+        assertNull(row.payloadAt)
+        assertNull(row.payloadPhoneLat)
+        assertNull(row.payloadOpAt)
+        val writing = Json { encodeDefaults = true }
+        val encoded = writing.encodeToString(row)
+        assertFalse(encoded.contains("payloadAt"))
+        val stamped = row.copy(payloadAt = 9L, payloadPhoneLat = 36.1, payloadPhoneLon = -115.1)
+        val back = json.decodeFromString<SitRadio>(json.encodeToString(stamped))
+        assertEquals(9L, back.payloadAt)
+        assertEquals(36.1, back.payloadPhoneLat!!, 0.0)
+        assertEquals(-115.1, back.payloadPhoneLon!!, 0.0)
     }
 
     @Test
@@ -732,9 +754,35 @@ class SitTest {
     }
 
     @Test
-    fun pathSubsamplesShortMoves() {
+    fun aSitPathKeepsATurnAndDropsSideWobble() {
         val session = SitSession.start(
-            name = "walk",
+            name = "drive",
+            now = 1_000L,
+            heard = emptyList(),
+            fleets = fleets,
+            watchDeviceKeys = emptySet(),
+            watchedFleetIds = emptySet(),
+        )
+        var lat = 40.0
+        var lon = -74.0
+        session.recordPath(lat, lon, 1_000L)
+        for (i in 1..8) {
+            val east = if (i % 2 == 0) 6.0 else -6.0
+            val step = driveOffset(lat, lon, 15.0, east)
+            lat = step.first
+            lon = step.second
+            session.recordPath(lat, lon, 1_000L + i * 1_000L)
+        }
+        assertTrue(session.operatorPath.size > 2)
+        val turned = driveOffset(lat, lon, 0.0, 40.0)
+        session.recordPath(turned.first, turned.second, 20_000L)
+        assertTrue(session.operatorPath.size >= 3)
+    }
+
+    @Test
+    fun aShortPathKeepsTheSitNameAndADriveDropsIt() {
+        val session = SitSession.start(
+            name = "camp",
             now = 1_000L,
             heard = emptyList(),
             fleets = fleets,
@@ -742,10 +790,161 @@ class SitTest {
             watchedFleetIds = emptySet(),
         )
         session.recordPath(40.0, -74.0, 1_000L)
-        session.recordPath(40.00001, -74.0, 2_000L)
-        assertEquals(1, session.operatorPath.size)
-        session.recordPath(40.001, -74.0, 8_000L)
-        assertEquals(2, session.operatorPath.size)
+        session.recordPath(40.0 + 20.0 / 111_320.0, -74.0, 5_000L)
+        assertEquals("camp", session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+        session.recordPath(40.0 + 150.0 / 111_320.0, -74.0, 30_000L)
+        assertNull(session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+        assertNull(session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+    }
+
+    @Test
+    fun aLongDriveDoesNotMeasureTheWholePathAgain() {
+        val session = SitSession.start(
+            name = "drive",
+            now = 1_000L,
+            heard = emptyList(),
+            fleets = fleets,
+            watchDeviceKeys = emptySet(),
+            watchedFleetIds = emptySet(),
+        )
+        var lat = 40.0
+        val lon = -74.0
+        session.recordPath(lat, lon, 1_000L)
+        session.recordPath(lat + 10.0 / 111_320.0, lon, 3_000L)
+        assertEquals("drive", session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+        for (i in 2..8_000) {
+            lat += 40.0 / 111_320.0
+            session.recordPath(lat, lon, 1_000L + i * 2_000L)
+        }
+        val started = System.nanoTime()
+        assertNull(session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("took ${elapsedMs}ms", elapsedMs < 200)
+        val again = System.nanoTime()
+        assertNull(session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+        val againMs = (System.nanoTime() - again) / 1_000_000
+        assertTrue("again ${againMs}ms", againMs < 20)
+    }
+
+    @Test
+    fun aStayInsideOnePlaceKeepsTheName() {
+        val session = SitSession.start(
+            name = "camp",
+            now = 1_000L,
+            heard = emptyList(),
+            fleets = fleets,
+            watchDeviceKeys = emptySet(),
+            watchedFleetIds = emptySet(),
+        )
+        var lat = 40.0
+        val lon = -74.0
+        var north = true
+        session.recordPath(lat, lon, 1_000L)
+        for (i in 1..4_000) {
+            if (i % 4 == 0) north = !north
+            lat += (if (north) 4.5 else -4.5) / 111_320.0
+            session.recordPath(lat, lon, 1_000L + i * 1_000L)
+        }
+        val started = System.nanoTime()
+        assertEquals("camp", session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+        val elapsedMs = (System.nanoTime() - started) / 1_000_000
+        assertTrue("took ${elapsedMs}ms", elapsedMs < 200)
+    }
+
+    @Test
+    fun trimmingThePathRechecksAPlaceThatWasStillSmall() {
+        val session = SitSession.start(
+            name = "camp",
+            now = 1_000L,
+            heard = emptyList(),
+            fleets = fleets,
+            watchDeviceKeys = emptySet(),
+            watchedFleetIds = emptySet(),
+        )
+        var lat = 40.0
+        var lon = -74.0
+        var heading = 0
+        session.recordPath(lat, lon, 1_000L)
+        var i = 0
+        while (session.pathCount < Sit.PATH_CAP && i < 40_000) {
+            i++
+            if (i % 12 == 0) heading = (heading + 1) % 4
+            val northM = when (heading) { 0 -> 5.0; 2 -> -5.0; else -> 0.0 }
+            val eastM = when (heading) { 1 -> 5.0; 3 -> -5.0; else -> 0.0 }
+            val step = driveOffset(lat, lon, northM, eastM)
+            lat = step.first
+            lon = step.second
+            session.recordPath(lat, lon, 1_000L + i * 1_000L)
+        }
+        assertEquals(Sit.PATH_CAP, session.pathCount)
+        assertEquals("camp", session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+        val jumped = driveOffset(lat, lon, 180.0, 0.0)
+        session.recordPath(jumped.first, jumped.second, 1_000L + i * 1_000L + 20_000L)
+        assertEquals(Sit.PATH_CAP, session.pathCount)
+        assertNull(session.onePlaceLabel(PlaceMemory.SEPARATION_M))
+    }
+
+    @Test
+    fun aSitSavesTheCamerasOnThePathAndAnOldFileStillLoads() {
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val legacy = json.decodeFromString<SitFile>(
+            """{"format":"fieldwatch-sit","formatVersion":1,"summary":{"id":"a","name":"lot","startAt":1000}}""",
+        )
+        assertTrue(legacy.pathCameras.isEmpty())
+        assertNull(legacy.cameraKept)
+        val session = SitSession.start(
+            name = "drive",
+            now = 1_000L,
+            heard = emptyList(),
+            fleets = fleets,
+            watchDeviceKeys = emptySet(),
+            watchedFleetIds = emptySet(),
+        )
+        val lat = 40.0
+        val lon = -74.0
+        session.recordPath(lat, lon, 1_000L)
+        session.recordPath(lat + 80.0 / 111_320.0, lon, 20_000L)
+        val plain = json.encodeToString(session.snapshot())
+        assertFalse(plain.contains("pathCameras"))
+        assertFalse(plain.contains("cameraKept"))
+        val spot = driveOffset(lat, lon, 40.0, 10.0)
+        val cam = FlockCamera(7L, spot.first, spot.second, emptyList(), flock = true)
+        val slice = session.cameraSlice()
+        assertNotNull(slice)
+        val fold = PathCameras.extend(slice!!.anchor, slice.points, slice.committed) { a, b, radius ->
+            if (Geo.meters(a, b, cam.lat, cam.lon) <= radius) listOf(cam) else emptyList()
+        }
+        session.applyCameraFold(fold)
+        val file = session.snapshot()
+        assertNotNull(file.cameraKept)
+        assertEquals(listOf(7L), file.pathCameras.map { it.key })
+        val back = json.decodeFromString<SitFile>(json.encodeToString(file))
+        assertEquals(listOf(7L), back.pathCameras.map { it.key })
+        assertEquals(file.cameraKept, back.cameraKept)
+        val resumed = SitSession(
+            back.summary,
+            path = back.operatorPath,
+            pathCameras = back.pathCameras,
+            cameraKept = back.cameraKept,
+        )
+        val again = resumed.cameraSlice()
+        assertEquals(file.cameraKept, again?.anchor)
+        assertEquals(listOf(7L), again?.committed?.map { it.key })
+    }
+
+    @Test
+    fun aShortSpanStaysExactAndALongOneUsesTheEnds() {
+        val short = List(10) { i -> GpsSample(i.toLong(), 40.0 + i * 10.0 / 111_320.0, -74.0) }
+        assertEquals(Geo.spanM(short), Geo.reachM(short), 0.01)
+        val long = List(600) { i -> GpsSample(i.toLong(), 40.0 + i * 20.0 / 111_320.0, -74.0) }
+        val exact = Geo.meters(long.first().lat, long.first().lon, long.last().lat, long.last().lon)
+        assertEquals(exact, Geo.reachM(long), 1.0)
+    }
+
+    private fun driveOffset(lat: Double, lon: Double, northM: Double, eastM: Double): Pair<Double, Double> {
+        val dLat = northM / 111_320.0
+        val dLon = eastM / (111_320.0 * kotlin.math.cos(Math.toRadians(lat)).coerceAtLeast(0.2))
+        return (lat + dLat) to (lon + dLon)
     }
 
     private fun radio(

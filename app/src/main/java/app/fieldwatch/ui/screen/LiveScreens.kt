@@ -1,16 +1,24 @@
 package app.fieldwatch.ui.screen
 
+import app.fieldwatch.domain.LanguageText
+import app.fieldwatch.domain.Rssi
+import app.fieldwatch.domain.MapCameraMarks
+import app.fieldwatch.domain.rowFillsWindow
+
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import java.util.Locale
 import app.fieldwatch.domain.GnssCopy
 import app.fieldwatch.ui.component.DecodeGlyph
+import app.fieldwatch.ui.component.NoticeBody
 import app.fieldwatch.ui.component.FieldwatchSwitch
 import app.fieldwatch.ui.component.FieldwatchFilterChip
 import androidx.compose.material.icons.Icons
@@ -62,7 +71,11 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.isActive
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -84,8 +97,17 @@ import app.fieldwatch.domain.ClassOutline
 import app.fieldwatch.domain.ClassSlice
 import app.fieldwatch.domain.FastPair
 import app.fieldwatch.domain.OutlineSnap
+import app.fieldwatch.domain.GpsSample
+import app.fieldwatch.domain.MapBasemap
+import app.fieldwatch.domain.MapOverlay
+import app.fieldwatch.domain.MapFrame
+import app.fieldwatch.domain.MapLookAhead
+import app.fieldwatch.ui.component.rememberMapFooter
 import app.fieldwatch.domain.ListLine
 import app.fieldwatch.domain.MacUtil
+import app.fieldwatch.domain.RadioBookmarks
+import app.fieldwatch.domain.SitPathPlot
+import app.fieldwatch.domain.livePathOnScreen
 import app.fieldwatch.domain.ScanStatus
 import app.fieldwatch.domain.ListSort
 import app.fieldwatch.domain.Palette
@@ -107,6 +129,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.fieldwatch.ui.component.PresenceTrack
+import app.fieldwatch.ui.component.SitPathCanvas
 import app.fieldwatch.ui.component.RssiBar
 import app.fieldwatch.ui.component.Sparkline
 import app.fieldwatch.ui.component.TrendMark
@@ -116,6 +139,7 @@ import app.fieldwatch.ui.theme.LocalNightMode
 import app.fieldwatch.ui.theme.PhosphorActive
 import app.fieldwatch.ui.theme.nightIf
 import kotlin.math.cos
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 @Composable
@@ -161,7 +185,7 @@ fun LivePane(
             (gnssNotice.showDialog || !gnssNotice.ended)
         if (gnssStatus == GnssCopy.PAUSED && !gnssAlert) {
             Text(
-                gnssStatus,
+                LanguageText.text("live.gnss.paused"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -179,29 +203,15 @@ fun LivePane(
             AlertDialog(
                 onDismissRequest = { vm.dismissGnss() },
                 title = { Text(gnssNotice.title) },
-                text = {
-                    Column {
-                        Text(gnssNotice.body)
-                        if (gnssNotice.details.isNotBlank()) {
-                            Text(
-                                "Details",
-                                style = MaterialTheme.typography.labelMedium,
-                                modifier = Modifier.padding(top = 14.dp),
-                            )
-                            Text(
-                                gnssNotice.details,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp),
-                            )
-                        }
-                    }
-                },
+                text = { NoticeBody(gnssNotice.body, gnssNotice.details) },
                 confirmButton = {
-                    TextButton(onClick = { vm.dismissGnss() }) { Text("OK") }
+                    TextButton(onClick = { vm.dismissGnss() }) { Text(LanguageText.text("ui.ok.label")) }
                 },
             )
         }
+        TrustedAlertDialog(vm)
+        CellAlertDialog(vm)
+        TrackerAlertDialog(vm)
         if (floodNotice != null && !floodNotice.showDialog) {
             Text(
                 floodNotice.line(),
@@ -214,7 +224,7 @@ fun LivePane(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
             ) {
                 Text(
-                    "Hide this burst",
+                    LanguageText.text("ui.hide.burst"),
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.weight(1f),
                 )
@@ -227,7 +237,7 @@ fun LivePane(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
             ) {
                 Text(
-                    if (floodHide.keys.size == 1) "Hiding 1 flood radio" else "Hiding ${floodHide.keys.size} flood radios",
+                    LanguageText.text("live.flood.hiding", mapOf("n" to floodHide.keys.size.toString())),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f),
@@ -239,18 +249,18 @@ fun LivePane(
             AlertDialog(
                 onDismissRequest = { vm.dismissPairingFlood() },
                 title = { Text(floodNotice.title()) },
-                text = { Text(floodNotice.body()) },
+                text = { NoticeBody(floodNotice.body()) },
                 confirmButton = {
-                    TextButton(onClick = { vm.dismissPairingFlood() }) { Text("Continue") }
+                    TextButton(onClick = { vm.dismissPairingFlood() }) { Text(LanguageText.text("ui.continue.label")) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { vm.hidePairingFlood() }) { Text("Hide these") }
+                    TextButton(onClick = { vm.hidePairingFlood() }) { Text(LanguageText.text("ui.hide.these")) }
                 },
             )
         }
         if (state.displayPaused) {
             Text(
-                "Display paused · radios still scanning and logging. Filters still apply when you run again. Tap Live to run the list again.",
+                LanguageText.text("ui.display.paused.radios.still"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -259,9 +269,12 @@ fun LivePane(
         if (state.filter.arrivalsOnly) {
             Text(
                 when {
-                    state.arrivalsLearning -> "New only · learning sitting Wi-Fi"
-                    state.hiddenKnown > 0 -> "New only · ${state.hiddenKnown} hidden"
-                    else -> "New only"
+                    state.arrivalsLearning -> LanguageText.text("ui.new.only.learning.sitting")
+                    state.hiddenKnown > 0 -> LanguageText.text(
+                        "live.new.hidden",
+                        mapOf("n" to state.hiddenKnown.toString()),
+                    )
+                    else -> LanguageText.text("ui.new.only")
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -270,7 +283,10 @@ fun LivePane(
         }
         if (state.filter.movingWithYou) {
             Text(
-                "Follow · path ${state.operatorSpanM.toInt()} m · Start over clears the path",
+                LanguageText.text(
+                    "live.follow.path",
+                    mapOf("n" to state.operatorSpanM.toInt().toString()),
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -278,7 +294,7 @@ fun LivePane(
         }
         if (state.filter.watchedOnly) {
             Text(
-                "Watched only",
+                LanguageText.text("ui.keep.watched.only"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -286,7 +302,7 @@ fun LivePane(
         }
         if (state.filter.customNamesOnly) {
             Text(
-                "Named radios only",
+                LanguageText.text("ui.keep.named.only"),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
@@ -297,8 +313,8 @@ fun LivePane(
             val now = System.currentTimeMillis()
             val dur = Sit.fmtDuration(openSit.durationMs(now))
             val cap = when {
-                state.sit.memoryTight -> " · memory cap"
-                state.sit.atCap -> " · ${Sit.RADIO_CAP} cap"
+                state.sit.memoryTight -> (" " + LanguageText.text("ui.memory.cap"))
+                state.sit.atCap -> " · " + LanguageText.text("live.radio.cap", mapOf("n" to Sit.RADIO_CAP.toString()))
                 else -> ""
             }
             Row(
@@ -308,7 +324,14 @@ fun LivePane(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Sit · ${openSit.name} · $dur · ${state.sit.radioCount} radios$cap",
+                    LanguageText.text(
+                        "live.sit.line",
+                        mapOf(
+                            "name" to openSit.name,
+                            "duration" to dur,
+                            "n" to state.sit.radioCount.toString(),
+                        ),
+                    ) + cap,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1,
@@ -325,12 +348,12 @@ fun LivePane(
         if (renameSit && openSit != null) {
             AlertDialog(
                 onDismissRequest = { renameSit = false },
-                title = { Text("Rename sit") },
+                title = { Text(LanguageText.text("ui.rename.sit")) },
                 text = {
                     FieldwatchOutlinedField(
                         value = renameDraft,
                         onValueChange = { renameDraft = it.take(Sit.NAME_MAX) },
-                        label = "Name",
+                        label = LanguageText.text("ui.name.label"),
                     )
                 },
                 confirmButton = {
@@ -339,31 +362,318 @@ fun LivePane(
                             renameSit = false
                             vm.renameSit(openSit.id, renameDraft)
                         },
-                    ) { Text("Save") }
+                    ) { Text(LanguageText.text("ui.save.label")) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { renameSit = false }) { Text("Cancel") }
+                    TextButton(onClick = { renameSit = false }) { Text(LanguageText.text("language.cancel")) }
                 },
             )
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (state.settings.viewMode) {
-                ViewMode.RADAR -> RadarView(live, vm, sort, windowMs, onOpen, emptyHint = liveEmpty(state, RADAR_EMPTY), showFleet = showFleet, demoMode = demoMode, flashKeys = flashKeys, alertedKeys = alertedKeys)
-                ViewMode.LIST -> RankedList(live, vm, onOpen, sparklines = false, sort = sort, windowMs = windowMs, showBar = showBar, layoutEpoch = state.settings.scanControlsExpanded, emptyHint = liveEmpty(state, LIST_EMPTY), showNewAge = state.filter.arrivalsOnly, showFleet = showFleet, showFrequency = showFrequency, showSeenTimes = showSeenTimes, flashKeys = flashKeys, alertedKeys = alertedKeys, pinEnd = pinEnd, titleLine = titleLine, subtitleLine = subtitleLine, demoMode = demoMode)
-                ViewMode.TIMELINE -> TimelineView(live, vm, onOpen, showFleet = showFleet, showFrequency = showFrequency, showSeenTimes = showSeenTimes, flashKeys = flashKeys, alertedKeys = alertedKeys, titleLine = titleLine, subtitleLine = subtitleLine, demoMode = demoMode)
-                ViewMode.HYBRID -> RankedList(live, vm, onOpen, sparklines = true, sort = sort, windowMs = windowMs, showBar = showBar, layoutEpoch = state.settings.scanControlsExpanded, emptyHint = liveEmpty(state, LIST_EMPTY), showNewAge = state.filter.arrivalsOnly, showFleet = showFleet, showFrequency = showFrequency, showSeenTimes = showSeenTimes, flashKeys = flashKeys, alertedKeys = alertedKeys, pinEnd = pinEnd, titleLine = titleLine, subtitleLine = subtitleLine, demoMode = demoMode)
-                ViewMode.BY_CLASS -> ClassOutlineView(
-                    live, vm, state, onOpen,
-                    sort = sort, windowMs = windowMs, showBar = showBar,
-                    emptyHint = liveEmpty(state, CLASS_EMPTY),
-                    showNewAge = state.filter.arrivalsOnly, showFleet = showFleet,
-                    showFrequency = showFrequency, showSeenTimes = showSeenTimes,
-                    flashKeys = flashKeys, alertedKeys = alertedKeys, titleLine = titleLine, subtitleLine = subtitleLine,
-                    demoMode = demoMode,
+            if (state.settings.livePathOnScreen()) {
+                LivePathSplit(
+                    state, vm, live, onOpen,
+                    sort, windowMs, showBar, showFleet, showFrequency, showSeenTimes,
+                    titleLine, subtitleLine, demoMode, flashKeys, alertedKeys, pinEnd,
+                )
+            } else {
+                LiveMode(
+                    state, vm, live, onOpen,
+                    sort, windowMs, showBar, showFleet, showFrequency, showSeenTimes,
+                    titleLine, subtitleLine, demoMode, flashKeys, alertedKeys, pinEnd,
                 )
             }
         }
     }
+}
+
+@Composable
+private fun LiveMode(
+    state: FieldwatchUi,
+    vm: FieldwatchViewModel,
+    live: List<Sighting>,
+    onOpen: (Sighting) -> Unit,
+    sort: StrengthSort,
+    windowMs: Long,
+    showBar: Boolean,
+    showFleet: Boolean,
+    showFrequency: Boolean,
+    showSeenTimes: Boolean,
+    titleLine: ListLine,
+    subtitleLine: ListLine,
+    demoMode: Boolean,
+    flashKeys: Set<String>,
+    alertedKeys: Set<String>,
+    pinEnd: Boolean,
+) {
+    when (state.settings.viewMode) {
+        ViewMode.RADAR -> RadarView(live, vm, sort, windowMs, onOpen, emptyHint = liveEmpty(state, RADAR_EMPTY), showFleet = showFleet, demoMode = demoMode, flashKeys = flashKeys, alertedKeys = alertedKeys)
+        ViewMode.LIST -> RankedList(live, vm, onOpen, sparklines = false, sort = sort, windowMs = windowMs, showBar = showBar, layoutEpoch = state.settings.scanControlsExpanded, emptyHint = liveEmpty(state, LIST_EMPTY), showNewAge = state.filter.arrivalsOnly, showFleet = showFleet, showFrequency = showFrequency, showSeenTimes = showSeenTimes, flashKeys = flashKeys, alertedKeys = alertedKeys, pinEnd = pinEnd, titleLine = titleLine, subtitleLine = subtitleLine, demoMode = demoMode)
+        ViewMode.TIMELINE -> TimelineView(live, vm, onOpen, showFleet = showFleet, showFrequency = showFrequency, showSeenTimes = showSeenTimes, flashKeys = flashKeys, alertedKeys = alertedKeys, titleLine = titleLine, subtitleLine = subtitleLine, demoMode = demoMode)
+        ViewMode.HYBRID -> RankedList(live, vm, onOpen, sparklines = true, sort = sort, windowMs = windowMs, showBar = showBar, layoutEpoch = state.settings.scanControlsExpanded, emptyHint = liveEmpty(state, LIST_EMPTY), showNewAge = state.filter.arrivalsOnly, showFleet = showFleet, showFrequency = showFrequency, showSeenTimes = showSeenTimes, flashKeys = flashKeys, alertedKeys = alertedKeys, pinEnd = pinEnd, titleLine = titleLine, subtitleLine = subtitleLine, demoMode = demoMode)
+        ViewMode.BY_CLASS -> ClassOutlineView(
+            live, vm, state, onOpen,
+            sort = sort, windowMs = windowMs, showBar = showBar,
+            emptyHint = liveEmpty(state, CLASS_EMPTY),
+            showNewAge = state.filter.arrivalsOnly, showFleet = showFleet,
+            showFrequency = showFrequency, showSeenTimes = showSeenTimes,
+            flashKeys = flashKeys, alertedKeys = alertedKeys, titleLine = titleLine, subtitleLine = subtitleLine,
+            demoMode = demoMode,
+        )
+    }
+}
+
+@Composable
+private fun LivePathSplit(
+    state: FieldwatchUi,
+    vm: FieldwatchViewModel,
+    live: List<Sighting>,
+    onOpen: (Sighting) -> Unit,
+    sort: StrengthSort,
+    windowMs: Long,
+    showBar: Boolean,
+    showFleet: Boolean,
+    showFrequency: Boolean,
+    showSeenTimes: Boolean,
+    titleLine: ListLine,
+    subtitleLine: ListLine,
+    demoMode: Boolean,
+    flashKeys: Set<String>,
+    alertedKeys: Set<String>,
+    pinEnd: Boolean,
+) {
+    val splitState = remember {
+        mutableFloatStateOf(state.settings.livePathSplit.coerceIn(0.22f, 0.78f))
+    }
+    val columnHeight = remember { mutableFloatStateOf(0f) }
+    var viewport by remember { mutableStateOf<SitPathPlot.Viewport?>(null) }
+    var tileWindow by remember { mutableStateOf<DoubleArray?>(null) }
+    val tileWindowKey = tileWindow?.let { SitPathPlot.tileWindowKey(it) }.orEmpty()
+    val tiles by vm.livePathTiles.collectAsStateWithLifecycle()
+    val zoomIn by vm.livePathZoomIn.collectAsStateWithLifecycle()
+    val flockRevision by vm.flockRevision.collectAsStateWithLifecycle()
+    val pendingCameras by vm.shownMapCameras.collectAsStateWithLifecycle()
+    val cameraMode = MapCameraMarks.onScreen(pendingCameras, state.settings.mapCameras)
+    val tip = state.operatorPath.lastOrNull()
+    val names = remember(state.watchlist) { RadioBookmarks.labels(state.watchlist) }
+    val model = remember(
+        state.operatorPath,
+        state.livePathRadios,
+        state.livePathSince,
+        state.fleets,
+        names,
+    ) {
+        SitPathPlot.Model(
+            samples = state.operatorPath,
+            dots = SitPathPlot.liveDots(
+                state.livePathRadios,
+                state.fleets,
+                names,
+                since = state.livePathSince,
+            ),
+            lengthM = 0.0,
+            spanM = 0.0,
+            title = "",
+            live = true,
+        )
+    }
+    val online = state.settings.onlineLookup
+    val basemap = state.settings.mapBasemap
+    val overlays = state.settings.mapOverlays
+    val mapKeyRev by vm.mapKeyRevision.collectAsStateWithLifecycle()
+    val pendingFrame by vm.shownMapFrame.collectAsStateWithLifecycle()
+    val mapFrame = MapFrame.onScreen(
+        pendingFrame,
+        MapFrame.resolved(state.settings.mapFrame, state.settings.mapRotate),
+    )
+    val tileKey = remember(state.operatorPath, online, basemap, overlays, mapKeyRev) {
+        livePathTileKey(state.operatorPath, online, basemap, overlays, mapKeyRev)
+    }
+    val tipBucket = if (tip == null) "" else {
+        "${(tip.lat * 2500.0).toInt()}:${(tip.lon * 2500.0).toInt()}"
+    }
+    val course = state.travelDeg
+    val courseKey = if (course.isFinite()) (course / MapLookAhead.TURN_DEG).toInt() else Int.MIN_VALUE
+    val heldMap = viewport != null
+    val screenTip = if (!heldMap && tileWindow == null) tipBucket else ""
+    // The list and the rest of this page draw first. The path lays out on the next frame.
+    var showMap by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        showMap = true
+    }
+    LaunchedEffect(tileKey, mapFrame, tileWindowKey, heldMap, screenTip) {
+        val held = viewport
+        val window = tileWindow
+        when {
+            window != null -> {
+                vm.refreshLivePathArea(
+                    window[0], window[1], window[2], window[3],
+                    online, basemap, overlays,
+                    held = held != null,
+                )
+            }
+            held != null -> {
+                vm.refreshLivePathViewport(held, online, basemap, overlays, held = true)
+            }
+            MapFrame.zoomed(mapFrame) && tip != null -> {
+                vm.refreshLivePathViewport(
+                    SitPathPlot.Viewport(
+                        tip.lat,
+                        tip.lon,
+                        MapFrame.CLOSE_TILE_HALF_M,
+                        MapFrame.CLOSE_TILE_HALF_M,
+                    ),
+                    online,
+                    basemap,
+                    overlays,
+                )
+            }
+            else -> vm.refreshLivePathTiles(state.operatorPath, online, basemap, overlays)
+        }
+    }
+    LaunchedEffect(tileKey, mapFrame, tileWindowKey, courseKey, heldMap, tipBucket) {
+        if (heldMap) return@LaunchedEffect
+        val window = tileWindow
+        val ahead = if (course.isFinite()) {
+            window ?: if (MapFrame.zoomed(mapFrame) && tip != null) {
+                SitPathPlot.Viewport(
+                    tip.lat,
+                    tip.lon,
+                    MapFrame.CLOSE_TILE_HALF_M,
+                    MapFrame.CLOSE_TILE_HALF_M,
+                ).coveredBounds()
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+        if (ahead != null) {
+            vm.prefetchLivePath(
+                ahead[0], ahead[1], ahead[2], ahead[3], course, online, basemap, overlays,
+            )
+        } else {
+            vm.stopLivePrefetch()
+        }
+    }
+    val split = splitState.floatValue
+    Column(
+        Modifier
+            .fillMaxSize()
+            .onSizeChanged { columnHeight.floatValue = it.height.toFloat() },
+    ) {
+        Box(
+            Modifier
+                .weight(split)
+                .fillMaxWidth()
+                .clipToBounds(),
+        ) {
+            if (!showMap && (state.operatorPath.isNotEmpty() || model.dots.isNotEmpty())) {
+                // Waiting one frame keeps a long path from holding up the list.
+            } else if (state.operatorPath.isEmpty() && model.dots.isEmpty()) {
+                Text(
+                    if (state.settings.tagLocation) {
+                        LanguageText.text("ui.waiting.gps.fix")
+                    } else {
+                        LanguageText.text("ui.turn.tag.detections.gps.2")
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(16.dp),
+                )
+            } else {
+                SitPathCanvas(
+                    model,
+                    modifier = Modifier.fillMaxSize(),
+                    tiles = tiles,
+                    onOpenRadio = { key ->
+                        val row = live.firstOrNull { it.key == key }
+                            ?: state.devices.firstOrNull { it.key == key }
+                            ?: state.livePathRadios.firstOrNull { it.key == key }
+                        row?.let(onOpen)
+                    },
+                    expand = true,
+                    viewport = viewport,
+                    onViewport = { viewport = it },
+                    courseDeg = state.travelDeg,
+                    mapFrame = mapFrame,
+                    onRotate = { vm.cycleMapFrame() },
+                    onToggleClose = { vm.toggleMapClose() },
+                    position = rememberMapFooter(
+                        state.settings.mapFooter,
+                        state.phoneLat,
+                        state.phoneLon,
+                        state.settings.demoMode,
+                    ),
+                    zoomIn = zoomIn,
+                    flock = state.settings.flockLayer || state.settings.sensorLayer,
+                    flockIndex = vm.flockIndex,
+                    flockRevision = flockRevision,
+                    cameraMode = cameraMode,
+                    onCycleCameras = vm::cycleMapCameras,
+                    camerasReady = (state.settings.flockLayer || state.settings.sensorLayer) &&
+                        vm.flockIndex.hasCameras(),
+                    onTileWindow = { next ->
+                        if (SitPathPlot.tileWindowKey(next) != tileWindowKey) tileWindow = next
+                    },
+                )
+            }
+        }
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(22.dp)
+                .semantics { contentDescription = LanguageText.text("ui.move.path") }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = { vm.setLivePathSplit(splitState.floatValue) },
+                        onVerticalDrag = { change, dragAmount ->
+                            change.consume()
+                            val usable = (columnHeight.floatValue - 22.dp.toPx()).coerceAtLeast(1f)
+                            splitState.floatValue = (splitState.floatValue + dragAmount / usable)
+                                .coerceIn(0.22f, 0.78f)
+                        },
+                    )
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(MaterialTheme.colorScheme.outline),
+            )
+            Box(
+                Modifier
+                    .width(36.dp)
+                    .height(4.dp)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant, RoundedCornerShape(2.dp)),
+            )
+        }
+        Box(Modifier.weight((1f - split).coerceAtLeast(0.22f)).fillMaxWidth()) {
+            LiveMode(
+                state, vm, live, onOpen,
+                sort, windowMs, showBar, showFleet, showFrequency, showSeenTimes,
+                titleLine, subtitleLine, demoMode, flashKeys, alertedKeys, pinEnd,
+            )
+        }
+    }
+}
+
+private fun livePathTileKey(
+    samples: List<GpsSample>,
+    online: Boolean,
+    basemap: MapBasemap,
+    overlays: Set<MapOverlay>,
+    mapKeyRev: Int,
+): String {
+    if (!online || samples.isEmpty()) return "off"
+    val end = samples.last()
+    return "$mapKeyRev:${basemap.name}:${MapOverlay.key(overlays)}:${samples.size / 4}:" +
+        "${(end.lat * 1000.0).roundToInt()}:${(end.lon * 1000.0).roundToInt()}"
 }
 
 @Composable
@@ -377,63 +687,79 @@ private fun LocationOffBanner() {
     }
     Column(Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
         Text(
-            "Location is off. Android will not return Wi-Fi or Bluetooth results.",
+            LanguageText.text("ui.location.off.android.will"),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.error,
         )
         if (canOpen) {
             TextButton(onClick = { runCatching { context.startActivity(settings) } }) {
-                Text("Turn on")
+                Text(LanguageText.text("ui.turn.label"))
             }
         }
     }
 }
 
 private fun arrivalsEmpty(state: FieldwatchUi): String? {
-    if (state.filter.movingWithYou) {
+    val filter = state.filter
+    if (filter.seenAtPlaces) {
+        return when {
+            !state.settings.placeWatch ->
+                LanguageText.text("ui.turn.settings.location.places")
+            !state.settings.tagLocation ->
+                LanguageText.text("ui.turn.settings.tag.detections")
+            filter.arrivalsOnly ->
+                LanguageText.text("ui.new.detections.only.hides")
+            else ->
+                LanguageText.text("ui.nothing.can.hear.right")
+        }
+    }
+    if (filter.movingWithYou) {
         return when {
             !state.settings.tagLocation ->
-                "Moving with you needs Settings → Tag detections with GPS, then a walk or drive."
+                LanguageText.text("ui.moving.needs.settings.tag")
             state.operatorSpanM < 45.0 ->
-                "GPS path ${state.operatorSpanM.toInt()} m — too short. Keep moving. " +
-                    "If this stays 0, Location is not updating (use high accuracy)."
-            state.filter.customNamesOnly || state.filter.watchedOnly ||
-                state.filter.namedOnly || state.filter.namedOnlyImplied() ->
-                "No loud BLE has stayed with you among the radios still allowed. " +
-                    "Tap the Moving with you preset to test BLE, or turn off Signatures only / Show only / Named radios only / Watched only."
+                LanguageText.text(
+                    "live.path.short",
+                    mapOf("n" to state.operatorSpanM.toInt().toString()),
+                )
+            filter.customNamesOnly || filter.watchedOnly ||
+                filter.namedOnly || filter.namedOnlyImplied() ->
+                (LanguageText.text("ui.no.loud.ble.has") + " ") +
+                    LanguageText.text("ui.tap.moving.preset.test")
             else ->
-                if (state.filter.hideMine) {
-                    "No loud BLE has stayed with you along this path. Wi-Fi access points stay hidden. Radios marked Mine stay off this list."
+                if (filter.hideMine) {
+                    LanguageText.text("ui.no.loud.ble.has.2")
                 } else {
-                    "No loud BLE has stayed with you along this path. Wi-Fi access points stay hidden. A tag in your bag or car should show. Find My MAC rotation will not stitch."
+                    LanguageText.text("ui.no.loud.ble.has.3")
                 }
         }
     }
-    if (state.filter.arrivalsOnly) {
+    if (filter.arrivalsOnly) {
         return when {
-            state.arrivalsLearning -> "Hiding sitting access points until the next Wi-Fi scan. New Bluetooth still shows right away."
+            state.arrivalsLearning -> LanguageText.text("ui.hiding.sitting.access.points")
             state.hiddenKnown > 0 ->
-                "${state.hiddenKnown} already seen are hidden. A new radio stays while we hear it, then at least as long as Brief hold after the last packet."
+                LanguageText.text(
+                    "live.already.hidden",
+                    mapOf("n" to state.hiddenKnown.toString()),
+                )
             else ->
-                "Waiting for a new Wi-Fi or BLE radio. It stays while we hear it, then at least as long as Brief hold after the last packet."
+                LanguageText.text("ui.waiting.new.wi.fi")
         }
     }
-    if (state.filter.watchedOnly) {
-        return "No watched radios on the air. Bookmark a signature, turn Alert on a Named radio, or turn off Filters → Watched only."
+    if (filter.watchedOnly) {
+        return LanguageText.text("ui.no.watched.radios.air")
     }
-    if (state.filter.customNamesOnly) {
-        return "No named radios on the air. Set a custom name on detail, or turn off Filters → Named radios only."
+    if (filter.customNamesOnly) {
+        return LanguageText.text("ui.no.named.radios.air")
     }
     return null
 }
 
-private const val LIST_EMPTY =
-    "No live emitters match the current filter. If this just emptied, the OS may be between scan windows — the last set is held and should return without a burst. Use Timeline for recent disappearances."
+private val LIST_EMPTY get() = LanguageText.text("ui.no.live.emitters.match")
 
-private const val CLASS_EMPTY =
-    "No live emitters match the current filter. If this just emptied, the OS may be between scan windows — the last set is held and should return without a burst."
+private val CLASS_EMPTY get() = LanguageText.text("ui.no.live.emitters.match.2")
 
-private const val RADAR_EMPTY = "No devices match the current filter"
+private val RADAR_EMPTY get() = LanguageText.text("ui.no.devices.match.current")
 
 /** Keeps the filter sentence. Adds the Diagnostics pointer only while a scan is blocked. */
 private fun liveEmpty(state: FieldwatchUi, fallback: String): String {
@@ -515,13 +841,13 @@ private fun ClassOutlineView(
                 FieldwatchFilterChip(
                     selected = !hideEmpty,
                     onClick = { vm.updateSettings { it.copy(outlineHideEmpty = false) } },
-                    label = { Text("Show all") },
+                    label = { Text(LanguageText.text("live.show.all")) },
                     modifier = Modifier.weight(1f),
                 )
                 FieldwatchFilterChip(
                     selected = hideEmpty,
                     onClick = { vm.updateSettings { it.copy(outlineHideEmpty = true) } },
-                    label = { Text("Collapse empty") },
+                    label = { Text(LanguageText.text("live.collapse.empty")) },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -540,10 +866,19 @@ private fun ClassOutlineView(
         item(key = "outline-summary") {
             val hidden = slices.count { it.radios.isEmpty() }
             val summary = buildString {
-                append("${devices.size} radios")
-                if (unmatched > 0) append(" · $unmatched unmatched")
-                if (multi > 0) append(" · $multi in more than one class")
-                if (hideEmpty && hidden > 0) append(" · $hidden empty hidden")
+                append(LanguageText.text("live.summary.radios", mapOf("n" to devices.size.toString())))
+                if (unmatched > 0) {
+                    append(" · ")
+                    append(LanguageText.text("live.summary.unmatched", mapOf("n" to unmatched.toString())))
+                }
+                if (multi > 0) {
+                    append(" · ")
+                    append(LanguageText.text("live.summary.multi", mapOf("n" to multi.toString())))
+                }
+                if (hideEmpty && hidden > 0) {
+                    append(" · ")
+                    append(LanguageText.text("live.summary.hidden", mapOf("n" to hidden.toString())))
+                }
             }
             Text(
                 summary,
@@ -558,9 +893,12 @@ private fun ClassOutlineView(
                     count = slice.radios.size,
                     subtitle = when {
                         slice.radios.isEmpty() -> null
-                        slice.kind == null -> "no signature"
+                        slice.kind == null -> LanguageText.text("live.no.signature")
                         slice.signatures.size == 1 -> vm.fleetName(slice.signatures.first().fleetId)
-                        else -> "${slice.signatures.size} signatures"
+                        else -> LanguageText.text(
+                            "live.signatures",
+                            mapOf("n" to slice.signatures.size.toString()),
+                        )
                     },
                     accent = slice.accent(vm).nightIf(LocalNightMode.current),
                     expanded = slice.id in openClasses,
@@ -900,6 +1238,7 @@ private fun RadarView(
     val beam = MaterialTheme.colorScheme.primary
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val youColor = MaterialTheme.colorScheme.primary
+    val youLabel = LanguageText.text("radar.you")
     val measurer = rememberTextMeasurer()
     val onAir = devices.count { !it.gone }
     val ringStyle = TextStyle(
@@ -1049,7 +1388,10 @@ private fun RadarView(
 
             drawCircle(youColor, radius = 7f, center = c)
             drawCircle(youColor.copy(alpha = 0.2f), radius = 16f, center = c)
-            val you = measurer.measure("YOU", ringStyle.copy(color = youColor, fontWeight = FontWeight.Bold))
+            val you = measurer.measure(
+                youLabel,
+                ringStyle.copy(color = youColor, fontWeight = FontWeight.Bold),
+            )
             drawText(you, topLeft = Offset(c.x - you.size.width / 2f, c.y + 12f))
         }
 
@@ -1063,11 +1405,17 @@ private fun RadarView(
                     emptyHint ?: RADAR_EMPTY
                 } else {
                     val zoomBit = if (zoom > 1.04f) {
-                        " · ×${"%.1f".format(Locale.US, zoom)} · double-tap reset"
+                        " · " + LanguageText.text(
+                            "radar.zoom",
+                            mapOf("zoom" to "%.1f".format(Locale.US, zoom)),
+                        )
                     } else {
-                        " · pinch to zoom"
+                        (" " + LanguageText.text("ui.pinch.zoom"))
                     }
-                    "$onAir on-air · ${devices.size} in filter · dim = gone · tap a blip$zoomBit"
+                    LanguageText.text(
+                        "radar.status",
+                        mapOf("on" to onAir.toString(), "shown" to devices.size.toString()),
+                    ) + zoomBit
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1077,27 +1425,52 @@ private fun RadarView(
     }
 }
 
-private fun LazyListState.indexVisible(index: Int): Boolean {
-    val vis = layoutInfo.visibleItemsInfo
-    if (vis.isEmpty()) return false
-    return index in vis.first().index..vis.last().index
+/** The whole row is inside the list window. A sliver at the bottom does not count. */
+private fun LazyListState.rowInView(index: Int): Boolean {
+    val info = layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return false
+    return rowFillsWindow(item.offset, item.size, info.viewportStartOffset, info.viewportEndOffset)
 }
 
 /**
- * Pin the class header (then the signature header) if the radio still
- * fits on screen. Far-down radios fall back to the row itself.
+ * Pin the class header, then the signature header, when the radio still
+ * fits in the list window. The strip under the live map is that window.
+ * Far-down radios fall back to the row itself.
  */
 private suspend fun LazyListState.scrollOutlineToRadio(snap: OutlineSnap) {
     scrollToItem(snap.classIndex)
     withFrameNanos { }
-    if (indexVisible(snap.radioIndex)) return
+    if (rowInView(snap.radioIndex)) return
     val sig = snap.signatureIndex
     if (sig != null) {
         scrollToItem(sig)
         withFrameNanos { }
-        if (indexVisible(snap.radioIndex)) return
+        if (rowInView(snap.radioIndex)) return
     }
-    scrollToItem(snap.radioIndex)
+    scrollRowIntoView(snap.radioIndex)
+}
+
+/**
+ * Bring [index] into the list window. A row that fits is shown whole.
+ * A row taller than the window stays pinned to the top of that window.
+ */
+private suspend fun LazyListState.scrollRowIntoView(index: Int) {
+    if (index < 0) return
+    scrollToItem(index)
+    withFrameNanos { }
+    val info = layoutInfo
+    val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
+    val start = info.viewportStartOffset
+    val end = info.viewportEndOffset
+    val room = end - start
+    if (room <= 0 || item.size >= room || rowInView(index)) return
+    val overflow = item.offset + item.size - end
+    if (overflow > 0) {
+        scroll { scrollBy(overflow.toFloat()) }
+        return
+    }
+    val above = start - item.offset
+    if (above > 0) scroll { scrollBy(-above.toFloat()) }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1168,7 +1541,7 @@ private fun RankedList(
         if (idx < 0) return@LaunchedEffect
         stickToTop.value = false
         stickToEnd.value = false
-        listState.scrollToItem(idx)
+        listState.scrollRowIntoView(idx)
     }
     LaunchedEffect(listState, pinEnd) {
         snapshotFlow {
@@ -1343,7 +1716,7 @@ fun DeviceRow(
                         TrendMark(device.rssiTrend())
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            "${device.rssi}",
+                            rssiNumber(device.rssi),
                             style = compactLine(16.sp, 18.sp, FontWeight.Bold).copy(fontFamily = FontFamily.Monospace),
                             color = accent,
                         )
@@ -1361,13 +1734,17 @@ fun DeviceRow(
                     if (showNewAge) {
                         val ageSec = ((now - device.firstSeen) / 1000L).coerceAtLeast(0L)
                         Text(
-                            if (ageSec < 60L) "new ${ageSec}s" else "new ${ageSec / 60L}m",
+                            if (ageSec < 60L) {
+                                LanguageText.text("live.age.s", mapOf("n" to "$ageSec"))
+                            } else {
+                                LanguageText.text("live.age.m", mapOf("n" to "${ageSec / 60L}"))
+                            },
                             style = compactLine(10.sp, 11.sp).copy(fontFamily = FontFamily.Monospace),
                             color = MaterialTheme.colorScheme.primary,
                         )
                     } else if (sort == StrengthSort.AVERAGE) {
                         Text(
-                            "avg $rankRssi",
+                            LanguageText.text("live.avg", mapOf("rssi" to "$rankRssi")),
                             style = compactLine(10.sp, 11.sp).copy(fontFamily = FontFamily.Monospace),
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -1442,7 +1819,7 @@ private fun FleetNameChips(
                 color = ink.copy(alpha = 0.12f),
             ) {
                 Text(
-                    "Mine",
+                    LanguageText.text("ui.mine.label"),
                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 0.dp),
                     maxLines = 1,
                     style = TextStyle(
@@ -1467,7 +1844,7 @@ private fun FleetNameChips(
             ) {
                 Icon(
                     Icons.AutoMirrored.Outlined.Notes,
-                    contentDescription = "Observer notes",
+                    contentDescription = LanguageText.text("ui.observer.notes"),
                     modifier = Modifier
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                         .size(11.dp),
@@ -1483,7 +1860,7 @@ private fun FleetNameChips(
             ) {
                 Icon(
                     Icons.Outlined.Notifications,
-                    contentDescription = "Alerted this session",
+                    contentDescription = LanguageText.text("ui.alerted.session"),
                     modifier = Modifier
                         .padding(horizontal = 5.dp, vertical = 1.dp)
                         .size(11.dp),
@@ -1617,7 +1994,7 @@ private fun TimelineView(
         if (beepSnap.seq <= 0 || beepSnap.key.isBlank()) return@LaunchedEffect
         val idx = devices.indexOfFirst { it.key == beepSnap.key }
         if (idx < 0) return@LaunchedEffect
-        listState.scrollToItem(idx + 1)
+        listState.scrollRowIntoView(idx + 1)
     }
     LazyColumn(
         state = listState,
@@ -1627,7 +2004,7 @@ private fun TimelineView(
     ) {
         item {
             Text(
-                "Last 15 minutes · solid bars are on-air windows",
+                LanguageText.text("ui.last.15.minutes.solid"),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1635,7 +2012,7 @@ private fun TimelineView(
         items(devices, key = { it.key }) { device ->
             val color = (device.fleetIds.firstOrNull()
                 ?.let { Color(Palette.color(vm.fleetColor(it))) }
-                ?: rssiColor(device.rssi))
+                ?: rssiColor(if (Rssi.measured(device.rssi)) device.rssi else -100))
                 .nightIf(LocalNightMode.current)
             val flash = MaterialTheme.colorScheme.primary.copy(alpha = 0.38f)
             val rowColor by animateColorAsState(
@@ -1671,7 +2048,11 @@ private fun TimelineView(
                         TrendMark(device.rssiTrend())
                         Spacer(Modifier.width(6.dp))
                         Column(horizontalAlignment = Alignment.End) {
-                            Text("${device.rssi} dBm", fontFamily = FontFamily.Monospace, color = color)
+                            Text(
+                                if (Rssi.measured(device.rssi)) "${device.rssi} dBm" else "- -",
+                                fontFamily = FontFamily.Monospace,
+                                color = color,
+                            )
                             if (showFrequency) {
                                 val fact = radioFactLine(device)
                                 if (fact != null) {
@@ -1777,6 +2158,8 @@ private fun listSubtitle(
         }
     }
 }
+
+private fun rssiNumber(rssi: Int): String = if (Rssi.measured(rssi)) "$rssi" else "- -"
 
 private fun radioFactLine(device: Sighting): String? {
     val ch = if (device.channel != 0) "ch${device.channel}" else null

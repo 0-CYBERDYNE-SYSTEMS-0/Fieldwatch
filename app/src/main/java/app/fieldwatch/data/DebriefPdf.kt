@@ -1,5 +1,7 @@
 package app.fieldwatch.data
 
+import app.fieldwatch.domain.LanguageText
+
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.DashPathEffect
@@ -23,16 +25,25 @@ import androidx.compose.ui.graphics.vector.VectorPath
 import androidx.compose.ui.graphics.vector.toPath
 import app.fieldwatch.domain.DebriefDoc
 import app.fieldwatch.domain.ExtraAttentionHit
+import app.fieldwatch.domain.FlockApproach
+import app.fieldwatch.domain.FlockCamera
+import app.fieldwatch.domain.FlockCredit
+import app.fieldwatch.domain.FlockIndex
+import app.fieldwatch.domain.FlockMark
 import app.fieldwatch.domain.ReportBar
 import app.fieldwatch.domain.ReportChart
 import app.fieldwatch.domain.Geo
 import app.fieldwatch.domain.GpsSample
+import app.fieldwatch.domain.SensorKind
 import app.fieldwatch.domain.SitPathPlot
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.atan2
+import kotlin.math.max
 
 /**
  * Letter-size field debrief. Android [PdfDocument] allows only one open page
@@ -40,33 +51,41 @@ import kotlin.math.abs
  * is drawn and finished before the next starts.
  */
 object DebriefPdf {
+    /** Debrief and Compare pages use the phone sans. That face covers Cyrillic. */
+    const val PDF_SANS = "sans-serif"
+
+    /** Characters placed on the page. Nothing is stripped, including Cyrillic. */
+    fun charactersDrawn(text: String): String = text
+
     private const val PAGE_W = 612
     private const val PAGE_H = 792
     private const val MARGIN = 48f
     private const val HEADER_H = 40f
     private const val FOOTER_H = 36f
-    private val INK = Color.parseColor("#12171C")
-    private val MUTED = Color.parseColor("#4A5560")
-    private val PHOS = Color.parseColor("#0B7A48")
-    private val HEADER_BG = Color.parseColor("#063D26")
-    private val ALERT_BG = Color.parseColor("#FFF6E5")
-    private val ALERT_BAR = Color.parseColor("#C47A00")
-    private val RULE = Color.parseColor("#C5CDD4")
-    private val TAKE_BG = Color.parseColor("#E8F5EE")
-    private val META_RULE = Color.parseColor("#E2E8ED")
-    private val PLOT_PANEL = Color.parseColor("#F4F7F5")
-    private val PLOT_INNER = Color.parseColor("#FFFFFF")
-    private val PLOT_GRID = Color.parseColor("#E4EBE6")
-    private val PATH_OTHER = Color.parseColor("#4A6FA5")
-    private val AIRCRAFT = Color.parseColor("#C47A00")
-    private val AIRCRAFT_INK = Color.parseColor("#111111")
-    private val CLASS_DISC = Color.parseColor("#FFB020")
-    private val PILOT_INK = Color.parseColor("#3D4A55")
-    private val PILOT_FILL = Color.parseColor("#F4F7FB")
-    private val PATH_STAY = Color.parseColor("#35D683")
-    private val DOT_ATTENTION = Color.parseColor("#E53935")
-    private val DOT_BOOKMARK = Color.parseColor("#0288D1")
-    private val GNSS_INK = Color.parseColor("#B91C1C")
+    private val INK by lazy { Color.parseColor("#12171C") }
+    private val MUTED by lazy { Color.parseColor("#4A5560") }
+    private val PHOS by lazy { Color.parseColor("#0B7A48") }
+    private val HEADER_BG by lazy { Color.parseColor("#063D26") }
+    private val ALERT_BG by lazy { Color.parseColor("#FFF6E5") }
+    private val ALERT_BAR by lazy { Color.parseColor("#C47A00") }
+    private val RULE by lazy { Color.parseColor("#C5CDD4") }
+    private val TAKE_BG by lazy { Color.parseColor("#E8F5EE") }
+    private val META_RULE by lazy { Color.parseColor("#E2E8ED") }
+    private val PLOT_PANEL by lazy { Color.parseColor("#F4F7F5") }
+    private val PLOT_INNER by lazy { Color.parseColor("#FFFFFF") }
+    private val PLOT_GRID by lazy { Color.parseColor("#E4EBE6") }
+    private val PATH_OTHER by lazy { Color.parseColor("#4A6FA5") }
+    /** Same blue as the path on the phone. */
+    private val PATH_ROUTE by lazy { Color.parseColor("#3E78F0") }
+    private val AIRCRAFT by lazy { Color.parseColor("#C47A00") }
+    private val AIRCRAFT_INK by lazy { Color.parseColor("#111111") }
+    private val CLASS_DISC by lazy { Color.parseColor("#FFB020") }
+    private val PILOT_INK by lazy { Color.parseColor("#3D4A55") }
+    private val PILOT_FILL by lazy { Color.parseColor("#F4F7FB") }
+    private val PATH_STAY by lazy { Color.parseColor("#35D683") }
+    private val DOT_ATTENTION by lazy { Color.parseColor("#E53935") }
+    private val DOT_BOOKMARK by lazy { Color.parseColor("#0288D1") }
+    private val GNSS_INK by lazy { Color.parseColor("#B91C1C") }
     private const val MARK_STAY = 1
     private const val MARK_SLATE = 2
     private const val MARK_AMBER = 3
@@ -77,6 +96,10 @@ object DebriefPdf {
     private const val MARK_ALERT = 8
     private const val MARK_GNSS = 9
     private const val MARK_GNSS_2 = 10
+    private const val MARK_ROUTE = 11
+    private const val MARK_CAMERA = 12
+    private const val PDF_CONE_M = 150.0 * 0.3048
+    private const val PDF_CONE_DEG = 50f
     private val CONTENT_W = (PAGE_W - 2 * MARGIN).toInt()
     private val TIME_FMT = SimpleDateFormat("HH:mm", Locale.getDefault())
     private val BODY_TOP = HEADER_H + 18f
@@ -91,9 +114,11 @@ object DebriefPdf {
         onProgress: (Float) -> Unit = {},
     ) {
         file.parentFile?.mkdirs()
-        onProgress(0.08f)
-        val blocks = layoutBlocks(doc, tiles, extraTiles)
-        onProgress(0.18f)
+        onProgress(0.02f)
+        val blocks = layoutBlocks(doc, tiles, extraTiles) { fraction ->
+            onProgress(0.02f + 0.66f * fraction)
+        }
+        onProgress(0.70f)
         val pages = paginate(blocks)
         val pdf = PdfDocument()
         val n = pages.size.coerceAtLeast(1)
@@ -109,9 +134,9 @@ object DebriefPdf {
             }
             stampChrome(canvas, i + 1, pages.size, doc)
             pdf.finishPage(page)
-            onProgress(0.18f + 0.72f * (i + 1).toFloat() / n)
+            onProgress(0.70f + 0.26f * (i + 1).toFloat() / n)
         }
-        onProgress(0.94f)
+        onProgress(0.97f)
         file.outputStream().use { pdf.writeTo(it) }
         pdf.close()
         onProgress(1f)
@@ -127,14 +152,15 @@ object DebriefPdf {
         doc: DebriefDoc,
         tiles: List<PathTiles.Tile>,
         extraTiles: List<List<PathTiles.Tile>>,
+        onProgress: (Float) -> Unit = {},
     ): List<Block> {
         val out = ArrayList<Block>()
         out += titleBlock(doc.pdfTitle)
         out += spacer(6f)
-        out += sectionHead("", "Disclaimer", alert = false)
+        out += sectionHead("", LanguageText.text("ui.disclaimer.label"), alert = false)
         doc.disclaimer.split("\n\n").forEach { para ->
-            chunkText(para.trim().ifBlank { " " }, CONTENT_W, 9f, muted = true).forEach { sl ->
-                out += textBlock(sl)
+            chunkText(para.trim().ifBlank { " " }, CONTENT_W, 9.5f, muted = false).forEach { sl ->
+                out += bodyBlock(sl, alert = false)
             }
             out += spacer(6f)
         }
@@ -155,37 +181,89 @@ object DebriefPdf {
             out += pathFigureBlock(extra, extraTiles.getOrElse(index) { emptyList() })
             out += spacer(10f)
         }
+        var expected = 0
         for (section in doc.sections) {
-            if (section.title == "Extra attention" && doc.extraAttention.isNotEmpty()) {
+            if (section.body.isNotBlank()) expected += textLines(section.body)
+            if (section.after.isNotBlank()) expected += textLines(section.after)
+        }
+        var done = 0
+        var lastReported = 0f
+        fun advance(n: Int) {
+            if (n <= 0) return
+            done += n
+            val fraction = if (expected <= 0) 1f else done.toFloat() / expected.toFloat()
+            if (fraction >= lastReported + 0.01f || done >= expected) {
+                lastReported = fraction
+                onProgress(fraction.coerceIn(0f, 1f))
+            }
+        }
+        for (section in doc.sections) {
+            if (section.title == LanguageText.text("chrome.extra.attention") && doc.extraAttention.isNotEmpty()) {
                 out += sectionHead(section.number, section.title, alert = true)
                 out += spacer(4f)
                 doc.extraAttention.forEach { hit ->
                     out += attentionNoteBlock(hit)
                     out += spacer(8f)
                 }
+                val skip = (if (section.body.isNotBlank()) textLines(section.body) else 0) +
+                    (if (section.after.isNotBlank()) textLines(section.after) else 0)
+                advance(skip)
                 continue
             }
             out += sectionHead(section.number, section.title, section.alert)
-            appendProse(out, section.body, section.alert)
+            appendProse(
+                out,
+                section.body,
+                section.alert,
+                cameraRows = section.title == LanguageText.text("ui.cameras.on.path"),
+                onLine = { advance(1) },
+            )
             section.chart?.takeIf { it.rows.isNotEmpty() }?.let { chart ->
                 chartBlocks(chart).forEach { out += it }
                 out += spacer(6f)
             }
-            appendProse(out, section.after, section.alert)
+            appendProse(out, section.after, section.alert, onLine = { advance(1) })
             out += spacer(8f)
         }
         out += takeawayBlock(doc.takeaway)
+        onProgress(1f)
         return out
     }
 
-    private fun appendProse(out: ArrayList<Block>, text: String, alert: Boolean) {
+    private fun textLines(text: String): Int {
+        if (text.isEmpty()) return 0
+        var n = 1
+        for (c in text) if (c == '\n') n++
+        return n
+    }
+
+    private fun appendProse(
+        out: ArrayList<Block>,
+        text: String,
+        alert: Boolean,
+        cameraRows: Boolean = false,
+        onLine: () -> Unit = {},
+    ) {
         if (text.isBlank()) return
         val paras = text.split('\n')
         val width = CONTENT_W - if (alert) 12 else 0
+        val quiet = if (cameraRows) cameraQuietLines() else emptySet()
+        var inRow = false
         paras.forEachIndexed { i, raw ->
             val para = raw.trimEnd()
+            val kind = if (cameraRows) cameraKindColor(para.trim()) else null
+            val nextBlank = i + 1 >= paras.size || paras[i + 1].isBlank()
             when {
-                para.isBlank() -> out += spacer(5f)
+                para.isBlank() -> {
+                    inRow = false
+                    out += spacer(if (cameraRows) 7f else 5f)
+                }
+                kind != null -> {
+                    if (i > 0 && paras[i - 1].isNotBlank()) out += spacer(6f)
+                    inRow = true
+                    out += cameraKindBlock(para.trim(), kind)
+                }
+                inRow -> out += cameraCountBlock(para.trim(), alert, keepWithNext = !nextBlank)
                 isStayHead(para) -> {
                     if (i > 0) out += spacer(8f)
                     out += subheadBlock(para.trim(), alert = alert)
@@ -198,10 +276,61 @@ object DebriefPdf {
                     para.trimStart().removePrefix("·").trimStart().removePrefix("•").trim(),
                     alert,
                 )
+                para.trim() in quiet -> chunkText(para.trim(), width, 9f, muted = true).forEach { sl ->
+                    out += bodyBlock(sl, alert)
+                }
                 else -> chunkText(para, width, 9.5f, muted = false).forEach { sl ->
                     out += bodyBlock(sl, alert)
                 }
             }
+            onLine()
+        }
+    }
+
+    /** Same solids as the path-screen dots. */
+    private fun cameraKindColor(line: String): Int? = when (line) {
+        LanguageText.text("ui.cameras.kind.flock") -> Color.parseColor("#3B82F6")
+        LanguageText.text("ui.cameras.kind.plate") -> Color.parseColor("#F59E0B")
+        LanguageText.text("ui.cameras.kind.speed") -> Color.parseColor("#14B8A6")
+        LanguageText.text("ui.cameras.kind.red") -> Color.parseColor("#EF4444")
+        LanguageText.text("ui.cameras.kind.other") -> Color.parseColor("#64748B")
+        else -> null
+    }
+
+    private fun cameraQuietLines(): Set<String> = setOf(
+        LanguageText.text(
+            "ui.cameras.within",
+            mapOf("meters" to FlockApproach.PATH_M.toInt().toString()),
+        ),
+        LanguageText.text("ui.cameras.no.path"),
+        LanguageText.text("ui.cameras.none.along"),
+    )
+
+    private fun cameraKindBlock(name: String, color: Int): Block {
+        val sl = layout(name, CONTENT_W - 16, 10f, muted = false, bold = true)
+        val h = maxOf(sl.height + 2f, 13f)
+        return Block(h, keepWithNext = true) { canvas, y ->
+            val dot = Paint().apply {
+                this.color = color
+                style = Paint.Style.FILL
+                isAntiAlias = true
+            }
+            canvas.drawCircle(MARGIN + 3.5f, y + 5.5f, 3.2f, dot)
+            canvas.save()
+            canvas.translate(MARGIN + 14f, y)
+            sl.draw(canvas)
+            canvas.restore()
+        }
+    }
+
+    private fun cameraCountBlock(text: String, alert: Boolean, keepWithNext: Boolean): Block {
+        val sl = layout(text, CONTENT_W - 14 - if (alert) 12 else 0, 9f, muted = true)
+        val h = sl.height + 2f
+        return Block(h, keepWithNext = keepWithNext) { canvas, y ->
+            canvas.save()
+            canvas.translate(MARGIN + 14f + if (alert) 10f else 0f, y)
+            sl.draw(canvas)
+            canvas.restore()
         }
     }
 
@@ -225,9 +354,9 @@ object DebriefPdf {
             isAntiAlias = true
         }
         drawLegendSwatch(canvas, MARGIN, y + 3f, PHOS)
-        canvas.drawText("Wi-Fi", MARGIN + 14f, y + 10f, paint)
+        canvas.drawText(LanguageText.text("radio.wifi"), MARGIN + 14f, y + 10f, paint)
         drawLegendSwatch(canvas, MARGIN + 58f, y + 3f, PATH_OTHER)
-        canvas.drawText("BLE", MARGIN + 72f, y + 10f, paint)
+        canvas.drawText(LanguageText.text("radio.ble"), MARGIN + 72f, y + 10f, paint)
     }
 
     private fun drawLegendSwatch(canvas: Canvas, x: Float, y: Float, color: Int) {
@@ -382,7 +511,7 @@ object DebriefPdf {
         val legend = legendRows(fig)
         val headerH = 20f + legend.size * 13f + 6f
         val (plotW, plotH) = figurePlotSize()
-        val cap = layout(fig.caption, CONTENT_W - 24, 8f, muted = true)
+        val cap = layout(fig.caption, CONTENT_W - 24, 10f, muted = false)
         val scaleH = 20f
         val h = headerH + plotH + 14f + scaleH + 8f + cap.height + 12f
         return Block(h) { canvas, y ->
@@ -400,21 +529,26 @@ object DebriefPdf {
                 isAntiAlias = true
                 letterSpacing = 0.12f
             }
-            canvas.drawText(fig.kicker, MARGIN + 8f, y + 15f, kicker)
+            val kickerLabel = if (fig.kicker == "AIRCRAFT") {
+                LanguageText.text("pdf.aircraft")
+            } else {
+                fig.kicker
+            }
+            canvas.drawText(kickerLabel, MARGIN + 8f, y + 15f, kicker)
             val stats = Paint().apply { color = MUTED; textSize = 8f; isAntiAlias = true }
             val span = if (fig.spanM >= 1000) {
-                "${"%.1f".format(Locale.US, fig.spanM / 1000)} km span"
+                LanguageText.text("pdf.km.span", mapOf("n" to "%.1f".format(Locale.US, fig.spanM / 1000)))
             } else {
-                "${fig.spanM.toInt()} m span"
+                LanguageText.text("pdf.m.span", mapOf("n" to "${fig.spanM.toInt()}"))
             }
             val len = if (fig.lengthM >= 1000) {
-                "${"%.1f".format(Locale.US, fig.lengthM / 1000)} km path"
+                LanguageText.text("pdf.km.path", mapOf("n" to "%.1f".format(Locale.US, fig.lengthM / 1000)))
             } else {
-                "${fig.lengthM.toInt()} m path"
+                LanguageText.text("pdf.m.path", mapOf("n" to "${fig.lengthM.toInt()}"))
             }
             val fixes = fig.tracks.filter { it.aircraft }.sumOf { it.samples.size }
             val right = if (fig.tracks.all { it.aircraft } && fixes == 1) {
-                "1 advertised fix"
+                LanguageText.text("ui.1.advertised.fix")
             } else {
                 "$len  ·  $span"
             }
@@ -462,7 +596,6 @@ object DebriefPdf {
             val tilePaint = Paint().apply {
                 isFilterBitmap = true
                 isAntiAlias = true
-                alpha = 210
             }
             tiles.forEach { tile ->
                 val nw = lay.project(tile.north, tile.west)
@@ -480,6 +613,7 @@ object DebriefPdf {
         if (phonePrimary != null && phonePrimary.samples.size >= 2 && fig.tracks.count { !it.aircraft } == 1) {
             drawPathTicks(canvas, lay, phonePrimary.samples, ::ox, ::oy, despike = true)
         }
+        drawPathCameras(canvas, lay, fig.cameras, ::ox, ::oy)
         fig.gnss.forEach { pin ->
             val pt = lay.project(pin.lat, pin.lon)
             drawGnssMark(canvas, ox(pt.x), oy(pt.y), pin.secondary)
@@ -527,6 +661,7 @@ object DebriefPdf {
         }
         canvas.restore()
         canvas.drawRect(plot, stroke)
+        drawMapCredit(canvas, plot, tiles, fig.cameras.isNotEmpty())
         val nP = Paint().apply {
             color = MUTED
             textSize = 8f
@@ -542,12 +677,12 @@ object DebriefPdf {
             isAntiAlias = true
         }
         canvas.drawCircle(nx, ny - 2f, 8f, nDisc)
-        canvas.drawText("N", nx, ny + 1f, nP)
+        canvas.drawText(LanguageText.text("pdf.north"), nx, ny + 1f, nP)
         val barW = plot.width() * lay.scaleBarFrac
         val label = if (lay.scaleBarM >= 1000) {
-            "${(lay.scaleBarM / 1000).toInt()} km"
+            LanguageText.text("pdf.km", mapOf("n" to "${(lay.scaleBarM / 1000).toInt()}"))
         } else {
-            "${lay.scaleBarM.toInt()} m"
+            LanguageText.text("pdf.m", mapOf("n" to "${lay.scaleBarM.toInt()}"))
         }
         val barPaint = Paint().apply {
             color = MUTED
@@ -592,13 +727,13 @@ object DebriefPdf {
                 track.aircraft && track.secondary -> PATH_OTHER
                 track.aircraft -> AIRCRAFT_INK
                 track.secondary -> PATH_OTHER
-                else -> Color.parseColor("#2A3340")
+                else -> PATH_ROUTE
             }
             style = Paint.Style.STROKE
             strokeWidth = when {
                 track.aircraft -> 1.8f
                 track.secondary -> 1.8f
-                else -> 2.4f
+                else -> 4.8f
             }
             strokeCap = Paint.Cap.ROUND
             strokeJoin = Paint.Join.ROUND
@@ -627,19 +762,20 @@ object DebriefPdf {
             drawClassMark(canvas, ox(pts.last().x), oy(pts.last().y))
             return
         }
-        val stays = Geo.legs(cleaned).filter { it.stay }
+        val stays = Geo.realStops(cleaned)
         val stayPaint = Paint().apply {
             color = if (track.secondary) PATH_OTHER else PATH_STAY
             style = Paint.Style.STROKE
-            strokeWidth = if (track.secondary) 4.5f else 7.2f
+            strokeWidth = if (track.secondary) 4.5f else 4.8f
             strokeCap = Paint.Cap.ROUND
             isAntiAlias = true
             alpha = if (track.secondary) 180 else 230
             if (track.secondary) pathEffect = DashPathEffect(floatArrayOf(8f, 5f), 0f)
         }
         for (i in 1 until pts.size) {
-            val t = cleaned.getOrNull(i)?.at ?: continue
-            if (stays.none { t in it.startAt..it.endAt }) continue
+            val from = cleaned.getOrNull(i - 1)?.at ?: continue
+            val to = cleaned.getOrNull(i)?.at ?: continue
+            if (!Geo.stopCovers(stays, from, to)) continue
             canvas.drawLine(
                 ox(pts[i - 1].x), oy(pts[i - 1].y),
                 ox(pts[i].x), oy(pts[i].y),
@@ -671,8 +807,8 @@ object DebriefPdf {
                 textSize = 7.5f
                 isAntiAlias = true
             }
-            canvas.drawText("Start", ox(pts.first().x) + 6f, oy(pts.first().y) - 4f, lab)
-            canvas.drawText("End", ox(pts.last().x) + 6f, oy(pts.last().y) - 4f, lab)
+            canvas.drawText(LanguageText.text("ui.start.label"), ox(pts.first().x) + 6f, oy(pts.first().y) - 4f, lab)
+            canvas.drawText(LanguageText.text("ui.end.label"), ox(pts.last().x) + 6f, oy(pts.last().y) - 4f, lab)
         }
     }
 
@@ -683,22 +819,28 @@ object DebriefPdf {
         val out = ArrayList<LegendSwatch>()
         when {
             phone.size >= 2 -> {
-                out += LegendSwatch("This sit", MARK_STAY)
-                out += LegendSwatch("Second sit", MARK_SLATE)
+                out += LegendSwatch(LanguageText.text("ui.sit.label.2"), MARK_ROUTE)
+                out += LegendSwatch(LanguageText.text("ui.second.sit"), MARK_SLATE)
             }
-            phone.any { it.samples.size >= 2 } -> out += LegendSwatch("Stay", MARK_STAY)
+            phone.any { it.samples.size >= 2 } -> {
+                out += LegendSwatch(LanguageText.text("ui.sit.label.2"), MARK_ROUTE)
+                out += LegendSwatch(LanguageText.text("ui.stay.label"), MARK_STAY)
+            }
+        }
+        if (fig.cameras.isNotEmpty()) {
+            out += LegendSwatch(LanguageText.text("ui.cameras.along.path"), MARK_CAMERA)
         }
         val craft = fig.tracks.filter { it.aircraft }
         if (craft.isNotEmpty()) {
-            out += LegendSwatch("Advertised", MARK_AMBER)
-            if (craft.any { it.secondary }) out += LegendSwatch("Second advertised", MARK_AMBER_DASH)
+            out += LegendSwatch(LanguageText.text("ui.advertised.label"), MARK_AMBER)
+            if (craft.any { it.secondary }) out += LegendSwatch(LanguageText.text("ui.second.advertised"), MARK_AMBER_DASH)
         }
-        if (fig.dots.any { it.extraAttention }) out += LegendSwatch("Extra attention", MARK_RED)
-        if (fig.dots.any { it.named }) out += LegendSwatch("MAC alert", MARK_BLUE)
-        if (fig.dots.any { !it.extraAttention && !it.named }) out += LegendSwatch("Signature alert", MARK_ALERT)
-        if (fig.pilots.isNotEmpty()) out += LegendSwatch("Pilot", MARK_PILOT)
+        if (fig.dots.any { it.extraAttention }) out += LegendSwatch(LanguageText.text("chrome.extra.attention"), MARK_RED)
+        if (fig.dots.any { it.named }) out += LegendSwatch(LanguageText.text("ui.mac.alert"), MARK_BLUE)
+        if (fig.dots.any { !it.extraAttention && !it.named }) out += LegendSwatch(LanguageText.text("ui.signature.alert"), MARK_ALERT)
+        if (fig.pilots.isNotEmpty()) out += LegendSwatch(LanguageText.text("ui.operator.label.2"), MARK_PILOT)
         if (fig.gnss.any { !it.secondary }) out += LegendSwatch("GNSS", MARK_GNSS)
-        if (fig.gnss.any { it.secondary }) out += LegendSwatch("Second GNSS", MARK_GNSS_2)
+        if (fig.gnss.any { it.secondary }) out += LegendSwatch(LanguageText.text("ui.second.gnss"), MARK_GNSS_2)
         return out
     }
 
@@ -764,10 +906,19 @@ object DebriefPdf {
             isAntiAlias = true
         }
         when (mark) {
+            MARK_ROUTE -> {
+                stroke.color = PATH_ROUTE
+                stroke.strokeWidth = 3.2f
+                canvas.drawLine(cx - 5f, cy, cx + 5f, cy, stroke)
+            }
             MARK_STAY -> {
                 stroke.color = PATH_STAY
                 stroke.strokeWidth = 3.2f
                 canvas.drawLine(cx - 5f, cy, cx + 5f, cy, stroke)
+            }
+            MARK_CAMERA -> {
+                fill.color = Color.parseColor("#3B82F6")
+                canvas.drawCircle(cx, cy, 2.8f, fill)
             }
             MARK_SLATE -> {
                 stroke.color = PATH_OTHER
@@ -924,6 +1075,215 @@ object DebriefPdf {
         }
     }
 
+    /**
+     * Cameras the path came near. A stored direction is a wedge. No direction is a dot.
+     * A direction that pointed away is not in [cameras].
+     */
+    private fun drawPathCameras(
+        canvas: Canvas,
+        lay: SitPathPlot.Layout,
+        cameras: List<FlockCamera>,
+        ox: (Float) -> Float,
+        oy: (Float) -> Float,
+    ) {
+        if (cameras.isEmpty()) return
+        val corners = arrayOf(
+            lay.unproject(lay.plotLeft, lay.plotTop),
+            lay.unproject(lay.plotRight, lay.plotTop),
+            lay.unproject(lay.plotLeft, lay.plotBottom),
+            lay.unproject(lay.plotRight, lay.plotBottom),
+        )
+        var south = 90.0
+        var north = -90.0
+        var west = 180.0
+        var east = -180.0
+        for ((lat, lon) in corners) {
+            if (!lat.isFinite() || !lon.isFinite()) return
+            if (lat < south) south = lat
+            if (lat > north) north = lat
+            if (lon < west) west = lon
+            if (lon > east) east = lon
+        }
+        val index = FlockIndex()
+        index.replace(cameras)
+        val marks = index.marks(
+            south, north, west, east,
+            project = { lat, lon ->
+                val pt = lay.project(lat, lon)
+                pt.x to pt.y
+            },
+            inside = { x, y ->
+                x in lay.plotLeft..lay.plotRight && y in lay.plotTop..lay.plotBottom
+            },
+        )
+        val metersPerPx = lay.metersPerPx.coerceAtLeast(0.05f)
+        for (mark in marks) {
+            val pt = lay.project(mark.lat, mark.lon)
+            drawPdfCamera(canvas, ox(pt.x), oy(pt.y), mark, lay, metersPerPx, ox, oy)
+        }
+    }
+
+    private fun drawPdfCamera(
+        canvas: Canvas,
+        atX: Float,
+        atY: Float,
+        mark: FlockMark,
+        lay: SitPathPlot.Layout,
+        metersPerPx: Float,
+        ox: (Float) -> Float,
+        oy: (Float) -> Float,
+    ) {
+        val ink = pdfCameraInk(mark)
+        if (mark.count > 1) {
+            val label = mark.count.toString()
+            val num = Paint().apply {
+                color = ink.ink
+                textSize = 7f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                textAlign = Paint.Align.CENTER
+                isAntiAlias = true
+            }
+            val radius = max(9f, num.measureText(label) / 2f + 3.2f)
+            val disc = Paint().apply { color = ink.dot; style = Paint.Style.FILL; isAntiAlias = true }
+            val halo = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL; isAntiAlias = true }
+            val edge = Paint().apply {
+                color = Color.parseColor("#0F172A")
+                style = Paint.Style.STROKE
+                strokeWidth = 1.4f
+                isAntiAlias = true
+            }
+            canvas.drawCircle(atX, atY, radius + 2.2f, halo)
+            canvas.drawCircle(atX, atY, radius + 2.2f, edge)
+            canvas.drawCircle(atX, atY, radius, disc)
+            canvas.drawText(label, atX, atY + 2.6f, num)
+            return
+        }
+        val fill = Paint().apply { color = ink.fill; style = Paint.Style.FILL; isAntiAlias = true }
+        val line = Paint().apply {
+            color = ink.line
+            style = Paint.Style.STROKE
+            strokeWidth = ink.stroke
+            isAntiAlias = true
+        }
+        var reach = 0f
+        if (ink.coneM > 0.0) {
+            for (facing in mark.facings) {
+                val (lat, lon) = FlockApproach.destination(mark.lat, mark.lon, facing.toDouble(), ink.coneM)
+                val end = lay.project(lat, lon)
+                val dx = ox(end.x) - atX
+                val dy = oy(end.y) - atY
+                if (dx == 0f && dy == 0f) continue
+                val radius = (ink.coneM / metersPerPx).toFloat().coerceIn(ink.minPx, ink.maxPx)
+                reach = max(reach, radius)
+                val bearing = atan2(dy.toDouble(), dx.toDouble()) * (180.0 / PI)
+                val box = RectF(atX - radius, atY - radius, atX + radius, atY + radius)
+                canvas.drawArc(box, (bearing - PDF_CONE_DEG / 2.0).toFloat(), PDF_CONE_DEG, true, fill)
+                canvas.drawArc(box, (bearing - PDF_CONE_DEG / 2.0).toFloat(), PDF_CONE_DEG, true, line)
+            }
+        }
+        val discR = 6.4f
+        val halo = Paint().apply { color = Color.WHITE; style = Paint.Style.FILL; isAntiAlias = true }
+        val edge = Paint().apply {
+            color = Color.parseColor("#0F172A")
+            style = Paint.Style.STROKE
+            strokeWidth = 1.5f
+            isAntiAlias = true
+        }
+        val dot = Paint().apply { color = ink.dot; style = Paint.Style.FILL; isAntiAlias = true }
+        canvas.drawCircle(atX, atY, discR, halo)
+        canvas.drawCircle(atX, atY, discR, edge)
+        canvas.drawCircle(atX, atY, 4.2f, dot)
+    }
+
+    private data class PdfInk(
+        val fill: Int,
+        val line: Int,
+        val glow: Int,
+        val core: Int,
+        val ink: Int,
+        val dot: Int,
+        val coneM: Double,
+        val minPx: Float,
+        val maxPx: Float,
+        val stroke: Float,
+    )
+
+    private fun pdfCameraInk(mark: FlockMark): PdfInk = when (mark.kind) {
+        SensorKind.SPEED -> PdfInk(
+            argb(0.62f, 0xFF14B8A6.toInt()), argb(0.92f, 0xFF5EEAD4.toInt()),
+            argb(0.55f, 0xFF2DD4BF.toInt()), argb(1f, 0xFF99F6E4.toInt()), Color.WHITE, 0xFF14B8A6.toInt(),
+            PDF_CONE_M, 18f, 56f, 1.8f,
+        )
+        SensorKind.RED -> PdfInk(
+            argb(0.62f, 0xFFEF4444.toInt()), argb(0.92f, 0xFFFCA5A5.toInt()),
+            argb(0.55f, 0xFFF87171.toInt()), argb(1f, 0xFFFECACA.toInt()), Color.WHITE, 0xFFEF4444.toInt(),
+            PDF_CONE_M, 18f, 56f, 1.8f,
+        )
+        SensorKind.GUNSHOT -> PdfInk(
+            argb(0.62f, 0xFF8B5CF6.toInt()), argb(0.92f, 0xFFC4B5FD.toInt()),
+            argb(0.55f, 0xFFA78BFA.toInt()), argb(1f, 0xFFDDD6FE.toInt()), Color.WHITE, 0xFFA78BFA.toInt(),
+            0.0, 18f, 56f, 1.8f,
+        )
+        SensorKind.CAMERA -> PdfInk(
+            argb(0.55f, 0xFF64748B.toInt()), argb(0.90f, 0xFF94A3B8.toInt()),
+            argb(0.45f, 0xFF64748B.toInt()), argb(1f, 0xFFCBD5E1.toInt()), Color.WHITE, 0xFF64748B.toInt(),
+            PDF_CONE_M * 0.5, 14f, 36f, 1.4f,
+        )
+        SensorKind.PLATE -> if (mark.flock) {
+            PdfInk(
+                argb(0.62f, 0xFF3B82F6.toInt()), argb(0.95f, 0xFF93C5FD.toInt()),
+                argb(0.55f, 0xFF60A5FA.toInt()), argb(1f, 0xFFBFDBFE.toInt()), Color.BLACK, 0xFF3B82F6.toInt(),
+                PDF_CONE_M, 18f, 56f, 1.8f,
+            )
+        } else {
+            PdfInk(
+                argb(0.62f, 0xFFF59E0B.toInt()), argb(0.95f, 0xFFFCD34D.toInt()),
+                argb(0.55f, 0xFFFBBF24.toInt()), argb(1f, 0xFFFDE68A.toInt()), Color.BLACK, 0xFFF59E0B.toInt(),
+                PDF_CONE_M, 18f, 56f, 1.8f,
+            )
+        }
+    }
+
+    private fun argb(alpha: Float, rgb: Int): Int {
+        val a = (alpha * 255f).toInt().coerceIn(0, 255)
+        return Color.argb(a, Color.red(rgb), Color.green(rgb), Color.blue(rgb))
+    }
+
+    private fun drawMapCredit(
+        canvas: Canvas,
+        plot: RectF,
+        tiles: List<PathTiles.Tile>,
+        cameras: Boolean,
+    ) {
+        val tile = tiles.firstOrNull()
+        val line = when {
+            tile != null -> FlockCredit.append(tile.basemap.creditLine(tile.overlays), cameras)
+            cameras -> FlockCredit.LINE
+            else -> return
+        }
+        val text = Paint().apply {
+            color = Color.rgb(32, 32, 32)
+            textSize = 6.5f
+            isAntiAlias = true
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        }
+        val width = text.measureText(line)
+        val padX = 3f
+        val padY = 1.5f
+        val right = plot.right - 3f
+        val bottom = plot.bottom - 3f
+        val left = (right - width - padX * 2f).coerceAtLeast(plot.left + 2f)
+        val top = bottom - text.textSize - padY * 2f
+        if (right - left < 8f || top < plot.top) return
+        val back = Paint().apply {
+            color = Color.argb(220, 255, 255, 255)
+            style = Paint.Style.FILL
+            isAntiAlias = true
+        }
+        canvas.drawRoundRect(RectF(left, top, right, bottom), 2f, 2f, back)
+        canvas.drawText(line, left + padX, bottom - padY - 1f, text)
+    }
+
     private fun drawPathTicks(
         canvas: Canvas,
         lay: SitPathPlot.Layout,
@@ -973,7 +1333,7 @@ object DebriefPdf {
         val craft = fig.craftKeys.filter { it.isNotBlank() }
         if (piles.isEmpty() && craft.isEmpty() && fig.gnss.isEmpty()) return emptyList()
         val out = ArrayList<Block>()
-        out += sectionHead("", "Path key", alert = false)
+        out += sectionHead("", LanguageText.text("ui.path.key"), alert = false)
         out += spacer(4f)
         piles.forEachIndexed { i, pile ->
             out += pathKeyRow(i + 1, pile)
@@ -994,16 +1354,18 @@ object DebriefPdf {
         val radios = pile.members.joinToString("  ·  ") { m ->
             val d = m.dot
             val kind = if (d.kind.name == "WIFI") "WIFI" else "BLE"
-            val tag = if (d.extraAttention) "Extra attention" else null
+            val tag = if (d.extraAttention) LanguageText.text("chrome.extra.attention") else null
             val fleets = d.fleetNames.filter { it.isNotBlank() }.joinToString(", ")
-            val obs = d.observerNotes.trim().takeIf { it.isNotEmpty() }?.let { "Observer: $it" }
+            val obs = d.observerNotes.trim().takeIf { it.isNotEmpty() }?.let {
+                LanguageText.text("pdf.observer", mapOf("note" to it))
+            }
             val who = listOfNotNull(kind, d.label.ifBlank { d.mac }, fleets.ifBlank { null }, tag, obs)
                 .joinToString(" ")
             val advertised = d.advertisedNote.trim()
             if (advertised.isEmpty()) who else "$who — $advertised"
         }
         return if (pile.stacked) {
-            "$n  ${pile.members.size} radios at this stop — $radios"
+            "$n  " + LanguageText.text("pdf.stop", mapOf("n" to "${pile.members.size}")) + " — $radios"
         } else {
             "$n  $radios"
         }
@@ -1018,13 +1380,17 @@ object DebriefPdf {
 
     private fun isStayHead(line: String): Boolean {
         val t = line.trim()
-        return t.matches(Regex("""^\d+\.\s+(Stay|Transit)\b.*""")) ||
+        val stay = Regex.escape(LanguageText.text("report.stay.word"))
+        val transit = Regex.escape(LanguageText.text("report.transit.word"))
+        return t.matches(Regex("""^\d+\.\s+(Stay|Transit|$stay|$transit)(?=\s|$).*""")) ||
             t.startsWith("• ")
     }
 
     private fun isKickerLine(line: String): Boolean {
         val t = line.trim()
         if (t.startsWith("Phone GPS")) return true
+        val phone = LanguageText.text("ui.phone.gps.hear.time").take(20)
+        if (phone.isNotEmpty() && t.startsWith(phone)) return true
         if (t.contains(". ")) return false
         return t.matches(Regex("""^[A-Z][A-Za-z0-9 +/'()&.,-]{0,48}:(\s.*)?$"""))
     }
@@ -1162,7 +1528,7 @@ object DebriefPdf {
         val innerW = CONTENT_W - 24
         val radio = layout(hit.radioLabel, innerW, 9f, muted = false, bold = true)
         val note = layout(hit.note, innerW, 9.5f, muted = false)
-        val foot = layout("Pattern match, not identity. Not a safety finding.", innerW, 8f, muted = true)
+        val foot = layout(LanguageText.text("ui.pattern.match.not.identity"), innerW, 8f, muted = true)
         val h = 22f + radio.height + 6f + note.height + 8f + foot.height + 12f
         return Block(h) { canvas, y ->
             val box = RectF(MARGIN - 6f, y, PAGE_W - MARGIN + 6f, y + h - 4f)
@@ -1177,7 +1543,8 @@ object DebriefPdf {
                 isAntiAlias = true
                 letterSpacing = 0.06f
             }
-            val label = "EXTRA ATTENTION  ·  ${hit.signature}".uppercase()
+            val chrome = LanguageText.text("chrome.extra.attention").uppercase(LanguageText.dateLocale())
+            val label = "$chrome  ·  ${hit.signature.uppercase(Locale.US)}"
             canvas.drawText(label, MARGIN + 10f, y + 14f, kicker)
             var ty = y + 20f
             canvas.save()
@@ -1212,7 +1579,7 @@ object DebriefPdf {
                 typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
                 isAntiAlias = true
             }
-            canvas.drawText("TAKEAWAY", MARGIN + 10f, y + 14f, k)
+            canvas.drawText(LanguageText.text("pdf.takeaway"), MARGIN + 10f, y + 14f, k)
             canvas.save()
             canvas.translate(MARGIN + 10f, y + 20f)
             body.draw(canvas)
@@ -1230,7 +1597,7 @@ object DebriefPdf {
             isAntiAlias = true
             letterSpacing = 0.12f
         }
-        canvas.drawText("sw33p3r_", MARGIN, 26f, title)
+        canvas.drawText("FIELDWATCH", MARGIN, 26f, title)
         val sub = Paint().apply {
             color = Color.parseColor("#C8D0D8")
             textSize = 9f
@@ -1250,7 +1617,7 @@ object DebriefPdf {
             textSize = 8f
             isAntiAlias = true
         }
-        canvas.drawText("sw33p3r_  ·  operationally sensitive", MARGIN, PAGE_H - 18f, f)
+        canvas.drawText(LanguageText.text("ui.off.grid.pete.llc"), MARGIN, PAGE_H - 18f, f)
         val pn = "$page / $total"
         canvas.drawText(pn, PAGE_W - MARGIN - f.measureText(pn), PAGE_H - 18f, f)
     }
@@ -1291,16 +1658,17 @@ object DebriefPdf {
         muted: Boolean,
         bold: Boolean = false,
     ): StaticLayout {
+        val shown = charactersDrawn(text)
         val tp = TextPaint().apply {
             color = if (muted) MUTED else INK
             textSize = size
             isAntiAlias = true
             typeface = Typeface.create(
-                Typeface.SANS_SERIF,
+                PDF_SANS,
                 if (bold) Typeface.BOLD else Typeface.NORMAL,
             )
         }
-        return StaticLayout.Builder.obtain(text, 0, text.length, tp, width.coerceAtLeast(40))
+        return StaticLayout.Builder.obtain(shown, 0, shown.length, tp, width.coerceAtLeast(40))
             .setAlignment(Layout.Alignment.ALIGN_NORMAL)
             .setLineSpacing(2f, 1f)
             .setIncludePad(false)

@@ -124,10 +124,13 @@ object SitExport {
 
     fun rows(devices: List<Sighting>, radios: LogExportRadios): List<Sighting> =
         devices.filter { radios.matches(it.kind) }
-            .sortedWith(compareByDescending<Sighting> { it.rssi }.thenBy { it.mac })
+            .sortedWith(compareByDescending<Sighting> { Rssi.rank(it.rssi) }.thenBy { it.mac })
 
     fun hearPoint(d: Sighting): GpsSample? {
-        val loudest = d.gpsTrail.maxByOrNull { it.rssi }
+        val loudest = d.gpsTrail.maxByOrNull { sample ->
+            val r = sample.rssi
+            if (r == 0 || !Rssi.measured(r)) Int.MIN_VALUE else r
+        }
         if (loudest != null) return loudest
         val lat = d.latitude
         val lon = d.longitude
@@ -147,6 +150,8 @@ object SitExport {
             LogExportKind.LOG_JSONL -> "jsonl"
             LogExportKind.GPX -> "gpx"
             LogExportKind.KML -> "kml"
+            LogExportKind.GEOJSON -> "geojson"
+            LogExportKind.ATAK -> "zip"
         }
         return "$prefix-$slug-$stamp.$ext"
     }
@@ -154,7 +159,8 @@ object SitExport {
     fun mime(kind: LogExportKind): String = when (kind) {
         LogExportKind.LOG_CSV, LogExportKind.WIGLE -> "text/csv"
         LogExportKind.LOG_JSONL -> "application/x-ndjson"
-        LogExportKind.GPX, LogExportKind.KML -> GeoExport.formatOf(kind)!!.mime
+        LogExportKind.GPX, LogExportKind.KML, LogExportKind.GEOJSON -> GeoExport.formatOf(kind)!!.mime
+        LogExportKind.ATAK -> "application/zip"
     }
 
     fun subject(kind: LogExportKind, sitName: String): String = when (kind) {
@@ -162,7 +168,9 @@ object SitExport {
         LogExportKind.LOG_JSONL -> "sw33p3r_ sit $sitName (JSON lines)"
         LogExportKind.GPX -> "sw33p3r_ sit $sitName (GPX)"
         LogExportKind.KML -> "sw33p3r_ sit $sitName (KML)"
+        LogExportKind.GEOJSON -> "sw33p3r_ sit $sitName (GeoJSON)"
         LogExportKind.WIGLE -> "sw33p3r_ sit $sitName (WiGLE CSV)"
+        LogExportKind.ATAK -> "sw33p3r_ sit $sitName (ATAK)"
     }
 
     fun emptyHint(kind: LogExportKind, radios: LogExportRadios): String {
@@ -171,10 +179,11 @@ object SitExport {
             LogExportRadios.WIFI -> "Wi-Fi radios"
             LogExportRadios.BLE -> "BLE radios"
         }
-        return if (kind == LogExportKind.LOG_CSV || kind == LogExportKind.LOG_JSONL) {
-            "No $which in this sit."
-        } else {
-            "No GPS-tagged $which in this sit. Settings → Tag detections with GPS."
+        return when (kind) {
+            LogExportKind.LOG_CSV, LogExportKind.LOG_JSONL -> "No $which in this sit."
+            LogExportKind.ATAK ->
+                "Nothing to map in this sit. Tag detections with GPS, or keep a radio that advertised a position."
+            else -> "No GPS-tagged $which in this sit. Settings → Tag detections with GPS."
         }
     }
 

@@ -14,33 +14,61 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.fieldwatch.BuildConfig
 import app.fieldwatch.FieldwatchApp
+import app.fieldwatch.domain.AppUpdate
+import app.fieldwatch.domain.AppUpdateDecision
+import app.fieldwatch.domain.AppUpdateNote
+import app.fieldwatch.domain.AppUpdatePrompt
+import app.fieldwatch.domain.AppUpdateSkip
 import app.fieldwatch.domain.AircraftTrail
 import app.fieldwatch.domain.AppSettings
+import app.fieldwatch.domain.MapBasemap
+import app.fieldwatch.domain.MapOverlay
+import app.fieldwatch.domain.MapCameraMarks
+import app.fieldwatch.domain.MapFrame
+import app.fieldwatch.domain.MapLookAhead
+import app.fieldwatch.domain.MapKey
+import app.fieldwatch.domain.MapKeyNotice
+import app.fieldwatch.domain.MapKeyProblem
+import app.fieldwatch.domain.anySensorAlert
 import app.fieldwatch.domain.attentionNotes
 import app.fieldwatch.domain.signatureNotes
 import app.fieldwatch.domain.detectionPolicy
 import app.fieldwatch.domain.gnssSettings
+import app.fieldwatch.data.AppUpdateClient
+import app.fieldwatch.data.AppUpdateInstall
 import app.fieldwatch.data.DebriefPdf
+import app.fieldwatch.data.FlockFiles
+import app.fieldwatch.data.ImportFileException
+import app.fieldwatch.data.ImportFiles
+import app.fieldwatch.data.SensorList
 import app.fieldwatch.data.PathTiles
 import app.fieldwatch.data.PlaceLookup
 import app.fieldwatch.domain.DeviceDetailPrompt
 import app.fieldwatch.domain.DeviceDetailText
 import app.fieldwatch.domain.DebriefDoc
 import app.fieldwatch.domain.DebriefPlaces
+import app.fieldwatch.domain.TrackerWatch
 import app.fieldwatch.domain.DebriefPrompt
 import app.fieldwatch.domain.DebriefReport
 import app.fieldwatch.domain.DefaultCatalog
 import app.fieldwatch.domain.DISCLAIMER_REV
 import app.fieldwatch.domain.disclaimerOk
 import app.fieldwatch.domain.FilterEngine
+import app.fieldwatch.domain.FlockCamera
+import app.fieldwatch.domain.FlockIndex
+import app.fieldwatch.domain.PathCameras
 import app.fieldwatch.domain.Geo
 import app.fieldwatch.domain.GeoExport
 import app.fieldwatch.domain.GpsSample
+import app.fieldwatch.domain.livePathOnScreen
 import app.fieldwatch.domain.LogExportKind
 import app.fieldwatch.domain.LogExportRadios
 import app.fieldwatch.domain.ScanRadioFacts
 import app.fieldwatch.domain.ScanStatus
+import app.fieldwatch.domain.GnssMark
 import app.fieldwatch.domain.SitExport
+import app.fieldwatch.domain.SitTakPackage
+import app.fieldwatch.domain.CatalogRequest
 import app.fieldwatch.domain.ClassOutline
 import app.fieldwatch.domain.CoTravel
 import app.fieldwatch.domain.FilterPreset
@@ -48,10 +76,14 @@ import app.fieldwatch.domain.FilterState
 import app.fieldwatch.domain.Fleet
 import app.fieldwatch.domain.Hunt
 import app.fieldwatch.domain.HuntCue
+import app.fieldwatch.domain.HuntHeat
+import app.fieldwatch.domain.HuntPlain
 import app.fieldwatch.domain.FamilyVerdict
 import app.fieldwatch.domain.LogRadio
 import app.fieldwatch.domain.RadioBookmarks
+import app.fieldwatch.domain.SpokenNames
 import app.fieldwatch.domain.RadioKind
+import app.fieldwatch.domain.Rssi
 import app.fieldwatch.domain.RssiSample
 import app.fieldwatch.domain.Sighting
 import app.fieldwatch.domain.SignatureCandidate
@@ -59,32 +91,50 @@ import app.fieldwatch.domain.SignatureCandidates
 import app.fieldwatch.domain.SignatureFamilyHint
 import app.fieldwatch.domain.CandidateReport
 
+import app.fieldwatch.domain.CatalogNeedsNewerApp
 import app.fieldwatch.domain.SignatureClass
 import app.fieldwatch.domain.SignatureEngine
 import app.fieldwatch.domain.SignatureListSort
 import app.fieldwatch.domain.SettingsExchange
 import app.fieldwatch.domain.SettingsPack
+import app.fieldwatch.domain.CellBook
+import app.fieldwatch.domain.TrustedBook
+import app.fieldwatch.domain.TrustedNets
+import app.fieldwatch.domain.TwinHear
 import app.fieldwatch.domain.SignatureExchange
 import app.fieldwatch.domain.TakFeedStatus
+import app.fieldwatch.domain.TakInstall
+import app.fieldwatch.domain.LanguageExportCopy
+import app.fieldwatch.domain.LanguageReportCopy
+import app.fieldwatch.domain.LanguagePack
+import app.fieldwatch.domain.LanguageParse
+import app.fieldwatch.domain.LanguageText
 import app.fieldwatch.domain.ListLine
 import app.fieldwatch.domain.MacUtil
 import app.fieldwatch.domain.PairingFlood
+import app.fieldwatch.domain.PlaceMemory
+import app.fieldwatch.domain.PlaceReport
 import app.fieldwatch.domain.ListSort
 import app.fieldwatch.domain.StrengthSort
 import app.fieldwatch.domain.ViewMode
 import app.fieldwatch.domain.WatchTarget
 import app.fieldwatch.domain.DebriefWindow
+import app.fieldwatch.domain.ShareFailure
 import app.fieldwatch.domain.Sit
 import app.fieldwatch.domain.SitDiff
 import app.fieldwatch.domain.SitDiffPrompt
 import app.fieldwatch.domain.SitPathPlot
 import app.fieldwatch.domain.SitUi
 import app.fieldwatch.radio.RadioPermissions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -93,11 +143,17 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import java.io.File
 import java.util.UUID
 
 data class CandidatesUi(
     val loading: Boolean = false,
+    val progress: Float = 0f,
+    val message: String = "",
     val report: CandidateReport? = null,
     val error: String? = null,
 )
@@ -112,14 +168,23 @@ data class PendingSettingsImport(
     val message: String,
 )
 
+data class LanguageUiState(
+    val snap: app.fieldwatch.data.LanguageSnapshot = app.fieldwatch.data.LanguageSnapshot(),
+    val pending: app.fieldwatch.domain.LanguagePreview? = null,
+    val errorKey: String? = null,
+)
+
 data class ExportUi(
     val active: Boolean = false,
     val progress: Float = 0f,
-    /** True: spinning wait (Debrief / AI Export). False: determinate bar (log). */
+    /**
+     * True: a moving wait and no percent. Catalog update only.
+     * Compare and Debrief keep the percent on screen. A quiet step creeps it.
+     */
     val spinner: Boolean = false,
     val message: String = "",
     val share: Intent? = null,
-    val shareTitle: String = "Export sw33p3r_ logs",
+    val shareTitle: String = LanguageText.text("ui.export.fieldwatch.logs"),
     val error: String? = null,
     val errorTitle: String? = null,
     val cleared: Boolean = false,
@@ -129,6 +194,24 @@ data class ExportUi(
     /** Shown after the user dismisses [noticeTitle]. Catalog import skip-decode only. */
     val followUpTitle: String? = null,
     val followUpMessage: String? = null,
+    /** This file needs a newer Fieldwatch. The dialog offers the app-update check. */
+    val updateApp: Boolean = false,
+)
+
+data class FlockLayerUi(
+    val busy: Boolean = false,
+    val percent: Int = 0,
+    val processing: Boolean = false,
+    val savedAt: Long = 0L,
+    val noticeKey: String? = null,
+    /** Digits for a server status, when [noticeKey] has {code}. */
+    val noticeCode: String = "",
+    /** The next line says the saved copy is unchanged. */
+    val noticeKeep: Boolean = false,
+    val confirm: Boolean = false,
+    val confirmUpdate: Boolean = false,
+    /** False when the saved file is the older Flock-only list. */
+    val fullList: Boolean = true,
 )
 
 data class FieldwatchUi(
@@ -157,22 +240,55 @@ data class FieldwatchUi(
     val displayPaused: Boolean = false,
     val operatorSpanM: Double = 0.0,
     val takStatus: TakFeedStatus = TakFeedStatus(),
+    /** This install's TAK tag. Not part of the settings pack. */
+    val takInstallTag: String = "",
     val sit: SitUi = SitUi(),
     val catalogVersion: Int = 0,
+    /** Phone GPS while Show live path is on this view. Empty when the band is off. Windowed. */
+    val operatorPath: List<GpsSample> = emptyList(),
+    /** Start of the live-map window. Sit start, or the later of switch-on and 15 minutes ago. */
+    val livePathSince: Long = Long.MIN_VALUE,
+    /** Watchlist alerts drawn on the live map. Not the filtered list. */
+    val livePathRadios: List<Sighting> = emptyList(),
+    /** This phone now. Null when the latest fix is older than 30 seconds. */
+    val phoneLat: Double? = null,
+    val phoneLon: Double? = null,
+    /** Degrees clockwise from north. NaN until GPS has shown a direction. */
+    val travelDeg: Double = Double.NaN,
 )
 
 class FieldwatchViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as FieldwatchApp
     val stationStatus: kotlinx.coroutines.flow.StateFlow<app.fieldwatch.radio.StationFeedStatus> = app.station.status
+    val mapKeyRevision: StateFlow<Int> = app.mapKeys.revision
+    val flockIndex: FlockIndex get() = app.flockIndex
+    val flockRevision: StateFlow<Int> = app.flockRevision
+    private val _flockLayer = MutableStateFlow(FlockLayerUi())
+    val flockLayerUi: StateFlow<FlockLayerUi> = _flockLayer.asStateFlow()
+    private val _sensorLayer = MutableStateFlow(FlockLayerUi())
+    val sensorLayerUi: StateFlow<FlockLayerUi> = _sensorLayer.asStateFlow()
+    private val _mapNotice = MutableStateFlow<MapKeyNotice?>(null)
+    val mapNotice: StateFlow<MapKeyNotice?> = _mapNotice
+    private var silencedMapNotice: MapKeyNotice? = null
     private val filters = FilterEngine()
     private val signatures = SignatureEngine()
     private val selectedKey = MutableStateFlow<String?>(null)
     private val draft = MutableStateFlow<Fleet?>(null)
     private var draftFromCandidates = false
     private val _export = MutableStateFlow(ExportUi())
+    /** Latest counted fraction. The pump may show a little ahead while a step is quiet. */
+    @Volatile private var exportReal = 0f
+    @Volatile private var exportShown = 0f
+    @Volatile private var exportNote = ""
+    @Volatile private var exportPaintNs = 0L
+    private var exportPump: Job? = null
+    private val _placeStreets = MutableStateFlow<Map<String, String>>(emptyMap())
+    val placeStreetNames: StateFlow<Map<String, String>> = _placeStreets
     val export: StateFlow<ExportUi> = _export
     private val _pendingSettingsImport = MutableStateFlow<PendingSettingsImport?>(null)
     val pendingSettingsImport: StateFlow<PendingSettingsImport?> = _pendingSettingsImport
+    private val _language = MutableStateFlow(LanguageUiState())
+    val language: StateFlow<LanguageUiState> = _language.asStateFlow()
     private val _candidates = MutableStateFlow(CandidatesUi())
     val candidates: StateFlow<CandidatesUi> = _candidates
     private val _logExportKind = MutableStateFlow(LogExportKind.LOG_CSV)
@@ -187,6 +303,32 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     val sitPath: StateFlow<SitPathPlot.Model?> = _sitPath
     private val _pathTiles = MutableStateFlow<List<PathTiles.Tile>>(emptyList())
     val pathTiles: StateFlow<List<PathTiles.Tile>> = _pathTiles
+    private val _pathZoomIn = MutableStateFlow(false)
+    val pathZoomIn: StateFlow<Boolean> = _pathZoomIn
+    private val _livePathTiles = MutableStateFlow<List<PathTiles.Tile>>(emptyList())
+    val livePathTiles: StateFlow<List<PathTiles.Tile>> = _livePathTiles
+    /** Zoom or compass tap. Shown at once. The settings file catches up after. */
+    private val _shownMapFrame = MutableStateFlow<Int?>(null)
+    val shownMapFrame: StateFlow<Int?> = _shownMapFrame.asStateFlow()
+    private val _shownMapCameras = MutableStateFlow<MapCameraMarks?>(null)
+    val shownMapCameras: StateFlow<MapCameraMarks?> = _shownMapCameras.asStateFlow()
+    private val _livePathZoomIn = MutableStateFlow(false)
+    val livePathZoomIn: StateFlow<Boolean> = _livePathZoomIn
+    private val liveFlight = MapFlight()
+    private val _huntTiles = MutableStateFlow<List<PathTiles.Tile>>(emptyList())
+    val huntTiles: StateFlow<List<PathTiles.Tile>> = _huntTiles
+    private val _huntZoomIn = MutableStateFlow(false)
+    val huntZoomIn: StateFlow<Boolean> = _huntZoomIn
+    private val huntFlight = MapFlight()
+    private val pathFlight = MapFlight()
+    /** A finger is holding Reports → Path. The fitted tile load must not replace that picture. */
+    @Volatile private var sitPathHeld = false
+    private var livePrefetchJob: Job? = null
+    private var livePrefetchKey: String? = null
+    private var livePrefetchCourse = Double.NaN
+    private var huntPrefetchJob: Job? = null
+    private var huntPrefetchKey: String? = null
+    private var huntPrefetchCourse = Double.NaN
     private val _pathAircraftTiles = MutableStateFlow<List<List<PathTiles.Tile>>>(emptyList())
     val pathAircraftTiles: StateFlow<List<List<PathTiles.Tile>>> = _pathAircraftTiles
     @Volatile private var pathRadios: List<Sighting> = emptyList()
@@ -201,6 +343,19 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     private val _alertedKeys = MutableStateFlow<Set<String>>(emptySet())
     val alertedKeys: StateFlow<Set<String>> = _alertedKeys
     private val clock = MutableStateFlow(System.currentTimeMillis())
+
+    /** When Show live path last turned on, or when the last sit ended while the switch stayed on. */
+    @Volatile
+    private var livePathArmedAt: Long = System.currentTimeMillis()
+
+    /**
+     * Where the blue dot was at [livePathArmedAt]. The stored line only moves its
+     * tip until the next bend, so the window needs this point to draw a stroke.
+     */
+    @Volatile
+    private var livePathMark: GpsSample? = null
+    private var openSitId: String? = null
+    private var sawSitUi = false
     private val locationEpoch = MutableStateFlow(0)
     private val locationReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -229,6 +384,13 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     private val huntStartedAt = MutableStateFlow(0L)
     private val huntPeakRssi = MutableStateFlow(-127)
     private val huntSamples = MutableStateFlow<List<RssiSample>>(emptyList())
+    private val huntTrail = MutableStateFlow<List<GpsSample>>(emptyList())
+    /** Radio for the hunt that is open. Cleared on leave, so the next Hunt click starts over. */
+    private var carriedHuntKey: String? = null
+    /** Cloud already on the map when this session opened. New hears append after it. */
+    private var huntBase = emptyList<GpsSample>()
+    /** Kept only while a hunt is open. Leave clears it. */
+    private var huntPlain: HuntPlain? = null
     private val _outlineOpenClasses = MutableStateFlow<Set<String>>(emptySet())
     val outlineOpenClasses: StateFlow<Set<String>> = _outlineOpenClasses
     private val _outlineOpenSigs = MutableStateFlow<Set<String>>(emptySet())
@@ -247,6 +409,194 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
 
     fun dismissGnss() {
         app.gnss.dismiss()
+        app.announceCell()
+    }
+
+    val trustedNotice = app.trusted.notice
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val trustedBook = app.trusted.bookFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, TrustedBook())
+    val trustedImportProblem = app.trusted.importProblem
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun dismissTrusted(ssid: String, bssid: String) {
+        app.trusted.dismiss(ssid, bssid, System.currentTimeMillis())
+        app.alerter.clearTrustedNote()
+        app.announceCell()
+    }
+
+    fun learnTrusted(ssid: String, bssid: String) {
+        app.trusted.learnAp(ssid, bssid, System.currentTimeMillis())
+        app.alerter.clearTrustedNote()
+        app.announceCell()
+    }
+
+    fun ignoreTrusted(ssid: String, bssid: String) {
+        app.trusted.ignore(ssid, bssid)
+        app.alerter.clearTrustedNote()
+        app.announceCell()
+    }
+
+    fun rememberTrusted(ssid: String, bssid: String) {
+        app.trusted.remember(ssid, bssid, System.currentTimeMillis())
+        app.alerter.clearTrustedNote()
+        app.announceCell()
+    }
+
+    val cellBook = app.cells.bookFlow
+        .stateIn(viewModelScope, SharingStarted.Eagerly, CellBook())
+
+    fun learnCell(episodeId: Long) {
+        app.cells.learn(episodeId, System.currentTimeMillis())
+        app.announceCell()
+    }
+
+    fun dismissCell(episodeId: Long) {
+        app.cells.dismiss(episodeId, System.currentTimeMillis())
+        app.announceCell()
+    }
+
+    val trackerNotice = app.tracker.notice
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Set when Open radio or that warning's shade tap should show the radio page. */
+    private val _radioPage = MutableStateFlow<String?>(null)
+    val radioPage: StateFlow<String?> = _radioPage.asStateFlow()
+
+    fun consumeRadioPage() {
+        _radioPage.value = null
+    }
+
+    fun dismissTracker() {
+        app.syncTrackerShade(app.tracker.dismissCurrent())
+    }
+
+    /**
+     * Opens that radio and keeps this warning down while the same condition continues.
+     * The shell reads [radioPage] and shows the radio page.
+     */
+    fun openTracker(notice: TrackerWatch.Notice) {
+        showRadio(notice.deviceKey)
+        app.syncTrackerShade(app.tracker.seenDevice(notice.deviceKey))
+    }
+
+    /**
+     * A tracker notification tap. A different radio, including a watchlist tap on
+     * the same extra, leaves the warning up and stays on the current page.
+     */
+    fun seenTracker(deviceKey: String) {
+        val before = app.tracker.notice.value
+        val next = app.tracker.seenDevice(deviceKey)
+        if (before?.deviceKey != deviceKey) return
+        app.syncTrackerShade(next)
+        showRadio(deviceKey)
+    }
+
+    /** Selects the live radio, or the sit copy if it has already left the list. */
+    private fun showRadio(deviceKey: String) {
+        val live = app.devices.devices.value.firstOrNull { it.key == deviceKey }
+        when {
+            live != null -> select(live)
+            else -> {
+                val held = app.sits.sighting(deviceKey)
+                if (held != null) select(if (held.gone) held else held.copy(gone = true))
+                else select(deviceKey)
+            }
+        }
+        _radioPage.value = deviceKey
+    }
+
+    fun removeCell(placeId: String, key: String) = app.cells.removeCell(placeId, key)
+
+    fun forgetCellPlace(placeId: String) {
+        app.cells.forget(placeId, System.currentTimeMillis())
+        app.announceCell()
+    }
+
+    private var cellNamesJob: Job? = null
+
+    /** Street names for cell places. One pass while the list is open. A saved name is kept. */
+    fun refreshCellPlaceNames() {
+        if (cellNamesJob?.isActive == true) return
+        cellNamesJob = viewModelScope.launch {
+            val tried = HashSet<String>()
+            while (isActive) {
+                val settings = app.config.settings
+                if (!settings.onlineLookup || settings.demoMode) return@launch
+                if (!PlaceLookup.online(app)) return@launch
+                val missing = app.cells.bookFlow.value.places
+                    .filter { it.name.isBlank() && Geo.cellKey(it.lat, it.lon) !in tried }
+                    .distinctBy { Geo.cellKey(it.lat, it.lon) }
+                    .take(8)
+                if (missing.isEmpty()) return@launch
+                val found = PlaceLookup.namesAt(app, missing.map { it.lat to it.lon })
+                missing.forEach { tried += Geo.cellKey(it.lat, it.lon) }
+                if (found.isNotEmpty()) app.cells.applyNames(found)
+            }
+        }
+    }
+
+    fun trustNetwork(ssid: String, picks: List<TwinHear>) {
+        if (!TrustedNets.canTrust(ssid, false) || picks.isEmpty()) return
+        app.trusted.trust(ssid, picks, System.currentTimeMillis())
+    }
+
+    fun forgetTrusted(ssid: String) {
+        app.trusted.forget(ssid)
+        app.alerter.clearTrustedNote()
+        app.announceCell()
+    }
+
+    fun renameTrusted(ssid: String, label: String) = app.trusted.rename(ssid, label)
+
+    fun setTrustedPaused(ssid: String, paused: Boolean) = app.trusted.setPaused(ssid, paused)
+
+    fun setTrustedTravels(ssid: String, travels: Boolean) = app.trusted.setTravels(ssid, travels)
+
+    fun removeTrustedAp(ssid: String, bssid: String) = app.trusted.removeAp(ssid, bssid)
+
+    fun removeTrustedPlace(ssid: String, index: Int) = app.trusted.removePlace(ssid, index)
+
+    fun stopTrustedIgnore(ssid: String, bssid: String) = app.trusted.stopIgnore(ssid, bssid)
+
+    fun clearTrustedImportFailed() = app.trusted.clearImportFailed()
+
+    fun exportTrustedToUri(uri: Uri) {
+        viewModelScope.launch {
+            runCatching {
+                val json = app.trusted.exportText()
+                withContext(Dispatchers.IO) {
+                    app.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(json.toByteArray(Charsets.UTF_8))
+                    } ?: error(LanguageText.text("ui.could.not.write.location"))
+                }
+            }.onSuccess {
+                _export.value = ExportUi(
+                    noticeTitle = LanguageText.text("trusted.export"),
+                    noticeMessage = LanguageText.text("trusted.export.places"),
+                )
+            }.onFailure { err ->
+                _export.value = ExportUi(
+                    error = err.message ?: LanguageText.text("ui.could.not.write.location"),
+                    errorTitle = LanguageText.text("trusted.export"),
+                )
+            }
+        }
+    }
+
+    fun importTrustedFromUri(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val text = withContext(Dispatchers.IO) { readImportText(uri, ImportFiles.TRUSTED_MAX) }
+                app.trusted.importText(text)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ImportFileException) {
+                app.trusted.noteImportProblem(e.key)
+            } catch (_: Exception) {
+                app.trusted.noteImportProblem("ui.could.not.read.file")
+            }
+        }
     }
 
     val gnssProfile = app.gnssProfile.profile
@@ -255,6 +605,21 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startGnssCalibration() = app.gnss.startCalibration()
 
     fun stopGnssCalibration() = app.gnss.stopCalibration()
+
+    val gnssRecordings = app.gnssRaw.recordings
+
+    fun shareGnssRecording(name: String) {
+        val file = app.gnssRaw.file(name) ?: return
+        val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            clipData = ClipData.newRawUri("gnss", uri)
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, LanguageText.text("ui.fieldwatch.gnss.recording"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        _export.value = ExportUi(share = intent, shareTitle = LanguageText.text("ui.gnss.recording"))
+    }
 
     val floodNotice: StateFlow<PairingFlood.Notice?> = combine(
         app.pairingFlood.notice,
@@ -310,6 +675,12 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
         val classById = config.fleets.associate { it.id to it.kind }
         val hiddenFlood = hide.keys
+        val mineKeys = RadioBookmarks.mineKeys(config.watchlist)
+        val placeKeys = if (config.filter.seenAtPlaces && config.settings.placeWatch) {
+            app.places.multiPlaceKeys(now, mineKeys)
+        } else {
+            emptySet()
+        }
         val filtered = labeled.filter { device ->
             if (hiddenFlood.isNotEmpty() && device.key in hiddenFlood) return@filter false
             if (!filters.pass(
@@ -321,7 +692,8 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     watchNames.keys,
                     RadioBookmarks.watchedFleetIds(config.watchlist),
                     RadioBookmarks.alertDeviceKeys(config.watchlist),
-                    RadioBookmarks.mineKeys(config.watchlist),
+                    mineKeys,
+                    placeKeys,
                 )
             ) {
                 return@filter false
@@ -377,6 +749,30 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             bleStarting = stats.bleStarting,
             bleHitsLastMin = stats.bleHitsLastMin,
         )
+        val pathOn = config.settings.livePathOnScreen()
+        val alertKeys = if (pathOn) RadioBookmarks.alertDeviceKeys(config.watchlist) else emptySet()
+        val watchedFleets = if (pathOn) RadioBookmarks.watchedFleetIds(config.watchlist) else emptySet()
+        val openPath = if (pathOn) {
+            app.sits.openLivePath(alertKeys, watchedFleets, hiddenFlood)
+        } else {
+            null
+        }
+        val pathSince = if (pathOn) {
+            SitPathPlot.livePathSince(now, livePathArmedAt, openPath?.startAt)
+        } else {
+            Long.MIN_VALUE
+        }
+        val pathSamples = when {
+            !pathOn -> emptyList()
+            openPath != null -> openPath.samples
+            else -> SitPathPlot.livePathSamples(app.operatorPathCopy(), pathSince, livePathMark)
+        }
+        val pathRadios = when {
+            !pathOn -> emptyList()
+            openPath != null -> openPath.radios
+            else -> SitPathPlot.livePathRadios(labeled, pathSince, alertKeys, watchedFleets, hiddenFlood)
+        }
+        val phone = app.currentFix()
         FieldwatchUi(
             devices = labeled,
             filtered = filtered,
@@ -405,7 +801,14 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 app.operatorPathLengthM()
             },
             takStatus = takStatus,
+            takInstallTag = config.takInstallTag,
             catalogVersion = config.version,
+            operatorPath = pathSamples,
+            livePathSince = pathSince,
+            livePathRadios = pathRadios,
+            phoneLat = phone?.first,
+            phoneLon = phone?.second,
+            travelDeg = app.travelDeg,
         )
     }.flowOn(Dispatchers.Default)
         .stateIn(
@@ -413,6 +816,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             SharingStarted.WhileSubscribed(5_000),
             FieldwatchUi(
                 settings = app.config.settings,
+                takInstallTag = app.config.takInstallTag,
                 catalogVersion = app.config.config.value.version,
             ),
         )
@@ -443,23 +847,28 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
-        FieldwatchUi(settings = app.config.settings),
+        FieldwatchUi(settings = app.config.settings, takInstallTag = app.config.takInstallTag),
     )
 
     val hunt: StateFlow<HuntUi> = combine(
-        combine(huntKey, huntStartedAt, huntPeakRssi, huntSamples) { key, started, peak, samples ->
-            arrayOf(key, started, peak, samples)
+        combine(huntKey, huntStartedAt, huntPeakRssi, huntSamples, app.huntCloud) { key, started, peak, samples, cloud ->
+            arrayOf(key, started, peak, samples, cloud)
         },
         app.devices.devices,
         clock,
-    ) { bits, devices, now ->
+        app.huntPose,
+    ) { bits, devices, now, pose ->
         val key = bits[0] as String?
         val started = bits[1] as Long
         val peak = bits[2] as Int
         @Suppress("UNCHECKED_CAST")
         val samples = bits[3] as List<RssiSample>
+        @Suppress("UNCHECKED_CAST")
+        val cloud = bits[4] as List<GpsSample>
         if (key == null) return@combine HuntUi()
         val device = devices.firstOrNull { it.key == key }
+        val fix = pose?.let { it.lat to it.lon } ?: app.huntFix(now)
+        val shown = HuntHeat.shown(huntBase, cloud)
         HuntUi(
             active = true,
             device = device,
@@ -468,8 +877,24 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             peakRssi = peak,
             samples = samples,
             lastSeen = device?.lastSeen ?: 0L,
+            trail = shown,
+            hereLat = fix?.first,
+            hereLon = fix?.second,
+            onGlobe = pose?.onGlobe == true,
+            uncertaintyM = pose?.uncertaintyM ?: 0.0,
+            holdFlat = pose?.holdFlat == true,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HuntUi())
+
+    private val _appUpdate = MutableStateFlow<AppUpdatePrompt?>(null)
+    val appUpdate: StateFlow<AppUpdatePrompt?> = _appUpdate.asStateFlow()
+    private val _appUpdateIntent = MutableStateFlow<Intent?>(null)
+    val appUpdateIntent: StateFlow<Intent?> = _appUpdateIntent.asStateFlow()
+    private val appUpdateLock = Mutex()
+    private var offeredUpdate: AppUpdateNote? = null
+    private var downloadedApk: File? = null
+    private var appUpdateJob: Job? = null
+    private var appUpdateToken = 0
 
     /** Re-read system Location. Live calls this when the screen resumes. */
     fun refreshLocation() {
@@ -482,6 +907,31 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     init {
+        // Custom sw33p3r_ build: upstream app self-update is disabled on purpose.
+        // lookForAppUpdate() must not run — an official APK would replace this
+        // custom Station build (different capabilities, Station feed) on install.
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val header = FlockFiles.peek(app.filesDir, SensorList.PLATES)
+                if (header != null) {
+                    _flockLayer.update {
+                        it.copy(savedAt = header.savedAt, fullList = header.version >= FlockFiles.ALL_PLATES)
+                    }
+                }
+                val other = FlockFiles.peek(app.filesDir, SensorList.OTHER)
+                if (other != null) {
+                    _sensorLayer.update { it.copy(savedAt = other.savedAt, fullList = true) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // The saved date can wait. Startup still opens.
+            }
+        }
+        armLivePath()
+        app.loadedLanguage()?.let { store ->
+            _language.value = LanguageUiState(store.current())
+        }
         ContextCompat.registerReceiver(
             app,
             locationReceiver,
@@ -514,7 +964,13 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
         viewModelScope.launch {
             app.sits.ui.collect { sit ->
-                val open = sit.open != null
+                val id = sit.open?.id
+                if (sawSitUi && openSitId != null && id == null) {
+                    armLivePath()
+                }
+                sawSitUi = true
+                openSitId = id
+                val open = id != null
                 app.pairingFlood.setSitOpen(open)
                 app.wifiFlood.setSitOpen(open)
                 refreshSitPath()
@@ -533,11 +989,15 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 key to devices.firstOrNull { it.key == key }
             }.collect { (key, device) ->
                 if (key == null || device == null) return@collect
+                val rssi = Rssi.lastMeasured(device.rssi, device.rssiHistory) ?: return@collect
+                val now = System.currentTimeMillis()
+                // Remember the strength for the next place. Do not repaint a spot already saved.
+                if (now - device.lastSeen <= Hunt.QUIET_MS) app.armHuntRssi(rssi, now)
                 val last = huntSamples.value.lastOrNull()
                 if (last != null && device.lastSeen <= last.at) return@collect
-                val sample = RssiSample(device.lastSeen, device.rssi)
+                val sample = RssiSample(device.lastSeen, rssi)
                 huntSamples.update { (it + sample).takeLast(120) }
-                if (device.rssi > huntPeakRssi.value) huntPeakRssi.value = device.rssi
+                if (rssi > huntPeakRssi.value) huntPeakRssi.value = rssi
             }
         }
         viewModelScope.launch {
@@ -618,6 +1078,20 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** Ends the tour and opens the Live display panel in one save. */
+    fun openTuneFromTour() {
+        viewModelScope.launch {
+            app.config.update {
+                it.copy(
+                    settings = it.settings.copy(
+                        liveTourDone = true,
+                        scanControlsExpanded = true,
+                    ),
+                )
+            }
+        }
+    }
+
     fun showLiveTour(then: () -> Unit = {}) {
         viewModelScope.launch {
             app.config.update {
@@ -639,25 +1113,72 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         selectedKey.value = device.key
     }
 
-    fun startHunt(device: Sighting) {
+    fun startHunt(device: Sighting, fresh: Boolean = false) {
         val now = System.currentTimeMillis()
-        huntKey.value = device.key
+        val resume = HuntHeat.resumes(carriedHuntKey, device.key, fresh)
+        val plain = if (resume) huntPlain else null
+        if (!resume) huntPlain = null
+        val kept = huntTrail.value
+        val seed = if (resume && plain == null) {
+            app.huntFix() ?: kept.lastOrNull()?.let { it.lat to it.lon }
+        } else {
+            null
+        }
+        huntBase = if (resume && plain == null) kept else emptyList()
+        app.beginHuntMotion(seed, plain, if (plain != null) kept else emptyList())
+        if (resume) {
+            if (HuntHeat.level(device.rssi) != null && device.rssi > huntPeakRssi.value) {
+                huntPeakRssi.value = device.rssi
+            }
+            val last = huntSamples.value.lastOrNull()
+            if (last == null || device.lastSeen > last.at) {
+                huntSamples.value = (huntSamples.value + RssiSample(device.lastSeen, device.rssi)).takeLast(120)
+            }
+            huntKey.value = device.key
+            carriedHuntKey = device.key
+            return
+        }
         huntStartedAt.value = now
-        huntPeakRssi.value = device.rssi
-        huntSamples.value = listOf(RssiSample(now, device.rssi))
+        val rssi = Rssi.lastMeasured(device.rssi, device.rssiHistory) ?: device.rssi
+        huntPeakRssi.value = rssi
+        huntSamples.value = listOf(RssiSample(now, rssi))
+        huntTrail.value = emptyList()
+        app.noteHunt(rssi, now)
+        huntKey.value = device.key
+        carriedHuntKey = device.key
+        huntFlight.pending = null
+        huntFlight.from = null
+        huntFlight.held = false
+        huntFlight.job?.cancel()
+        huntFlight.job = null
+        huntFlight.key = null
+        _huntTiles.value = emptyList()
+        _huntZoomIn.value = false
     }
 
     fun resetHunt() {
         val key = huntKey.value ?: return
         val live = app.devices.devices.value.firstOrNull { it.key == key } ?: return
-        startHunt(live)
+        startHunt(live, fresh = true)
     }
 
+    /** The step sensor is on this phone, and Hunt does not have permission for it yet. */
+    fun huntNeedsStepPermission(): Boolean = app.huntNeedsStepPermission()
+
+    /** Permission just arrived. Follow the step sensor and leave the walk where it is. */
+    fun useHardwareSteps() = app.useHardwareSteps()
+
+    /** Sensors stop. The next Hunt on a radio detail starts a new walk. */
     fun stopHunt() {
+        app.endHuntMotion()
         huntKey.value = null
-        huntSamples.value = emptyList()
-        huntPeakRssi.value = -127
-        huntStartedAt.value = 0L
+        carriedHuntKey = null
+        huntPlain = null
+        huntTrail.value = emptyList()
+        huntBase = emptyList()
+        huntFlight.pending = null
+        huntFlight.job?.cancel()
+        huntFlight.job = null
     }
 
     fun huntTick(beepOn: Boolean, vibrateOn: Boolean) {
@@ -745,6 +1266,724 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    private fun armLivePath(at: Long = System.currentTimeMillis()) {
+        livePathArmedAt = at
+        val tip = app.operatorPathCopy().lastOrNull()
+        livePathMark = tip?.let { GpsSample(at, it.lat, it.lon) }
+    }
+
+    fun toggleLivePath() {
+        viewModelScope.launch {
+            app.config.update { config ->
+                val on = !config.settings.showLivePath
+                if (on) armLivePath()
+                config.copy(settings = config.settings.copy(showLivePath = on))
+            }
+        }
+    }
+
+    /** Camera control under the compass. On, then off. */
+    fun cycleMapCameras() {
+        val settings = app.config.settings
+        val current = _shownMapCameras.value ?: settings.mapCameras
+        val next = current.next()
+        _shownMapCameras.value = next
+        viewModelScope.launch {
+            app.config.update { config ->
+                config.copy(settings = config.settings.copy(mapCameras = next))
+            }
+        }
+    }
+
+    /** Compass button. North-up or direction of travel. Zoom stays. No Settings row. */
+    fun cycleMapFrame() {
+        val settings = app.config.settings
+        val current = _shownMapFrame.value ?: MapFrame.resolved(settings.mapFrame, settings.mapRotate)
+        showMapFrame(MapFrame.bearingToggled(current))
+    }
+
+    /** Double-tap. Whole path or the close view around this phone. Bearing stays. */
+    fun toggleMapClose() {
+        val settings = app.config.settings
+        val current = _shownMapFrame.value ?: MapFrame.resolved(settings.mapFrame, settings.mapRotate)
+        showMapFrame(MapFrame.zoomToggled(current))
+    }
+
+    /** The picture changes on this call. Saving the frame does not hold the map. */
+    private fun showMapFrame(next: Int) {
+        _shownMapFrame.value = next
+        viewModelScope.launch {
+            app.config.update { config ->
+                config.copy(
+                    settings = config.settings.copy(
+                        mapFrame = next,
+                        mapRotate = MapFrame.turns(next),
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Persist the divider after the finger lifts. Skip a write that did not really move. */
+    fun setLivePathSplit(fraction: Float) {
+        val next = fraction.coerceIn(0.22f, 0.78f)
+        viewModelScope.launch {
+            app.config.update {
+                val current = it.settings.livePathSplit
+                if (abs(current - next) < 0.01f) it
+                else it.copy(settings = it.settings.copy(livePathSplit = next))
+            }
+        }
+    }
+
+    /**
+     * Street tiles for the live path only. Reports keep [pathTiles].
+     * One fix is enough to show the neighborhood. The line still needs a second point.
+     * A coarse key skips a fetch while the walk has barely moved.
+     */
+    fun refreshLivePathTiles(
+        samples: List<GpsSample>,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+    ) {
+        if (!online || samples.isEmpty()) {
+            cancelFlight(liveFlight, live = true)
+            if (_livePathTiles.value.isNotEmpty()) _livePathTiles.value = emptyList()
+            _livePathZoomIn.value = false
+            return
+        }
+        if (missingMapKey(basemap)) {
+            cancelFlight(liveFlight, live = true)
+            liveFlight.key = "missing:${basemap.name}:${app.mapKeys.revision.value}"
+            _livePathTiles.value = emptyList()
+            _livePathZoomIn.value = false
+            noteMapTiles(basemap, MapKeyProblem.MISSING)
+            return
+        }
+        val end = samples.last()
+        val key = tileRequestKey(
+            basemap,
+            overlays,
+            "${samples.size / 4}:${(end.lat * 1000.0).roundToInt()}:${(end.lon * 1000.0).roundToInt()}",
+        )
+        if (key == liveFlight.key) return
+        liveFlight.pending = null
+        liveFlight.from = null
+        liveFlight.held = false
+        liveFlight.key = key
+        liveFlight.job?.cancel()
+        liveFlight.job = viewModelScope.launch(Dispatchers.Default) {
+            val batch = try {
+                PathTiles.load(
+                    app, samples,
+                    onlineLookup = true,
+                    basemap = basemap,
+                    mapKey = keyFor(basemap),
+                    overlays = overlays,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                PathTiles.Batch(problem = if (basemap.needsKey) MapKeyProblem.FAILED else MapKeyProblem.NONE)
+            }
+            if (isActive && liveFlight.key == key) {
+                noteMapTiles(basemap, batch.problem)
+                _livePathZoomIn.value = batch.zoomIn
+                _livePathTiles.value = if (batch.zoomIn) emptyList() else batch.tiles
+            }
+        }
+    }
+
+    /**
+     * Tiles for the area the user is looking at. Pictures already on screen stay.
+     * A finger move does not cancel the load that is already running.
+     */
+    fun refreshLivePathViewport(
+        view: SitPathPlot.Viewport,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+        held: Boolean = false,
+    ) {
+        val bounds = view.coveredBounds()
+        refreshLivePathArea(
+            bounds[0], bounds[1], bounds[2], bounds[3], online, basemap, overlays, held,
+        )
+    }
+
+    /**
+     * Tiles for a south, north, west, east window. Each picture is shown as it arrives.
+     * Tiles that still meet the window, plus one screen around it, stay so a scroll back
+     * is not black. [held] asks for the next screen along the finger once this load ends.
+     */
+    fun refreshLivePathArea(
+        south: Double,
+        north: Double,
+        west: Double,
+        east: Double,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+        held: Boolean = false,
+    ) {
+        refreshArea(
+            liveFlight, _livePathTiles, _livePathZoomIn, live = true,
+            south, north, west, east, online, basemap, overlays, held,
+        )
+    }
+
+    /** Street tiles under the Hunt cloud. A held view uses [refreshHuntViewport]. */
+    fun refreshHuntTiles(
+        samples: List<GpsSample>,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+    ) {
+        if (!online || samples.isEmpty()) {
+            cancelFlight(huntFlight, live = false)
+            if (_huntTiles.value.isNotEmpty()) _huntTiles.value = emptyList()
+            _huntZoomIn.value = false
+            return
+        }
+        if (missingMapKey(basemap)) {
+            cancelFlight(huntFlight, live = false)
+            huntFlight.key = "missing:${basemap.name}:${app.mapKeys.revision.value}"
+            _huntTiles.value = emptyList()
+            _huntZoomIn.value = false
+            noteMapTiles(basemap, MapKeyProblem.MISSING)
+            return
+        }
+        val end = samples.last()
+        val key = tileRequestKey(
+            basemap,
+            overlays,
+            "${samples.size / 4}:${(end.lat * 1000.0).roundToInt()}:${(end.lon * 1000.0).roundToInt()}",
+        )
+        if (key == huntFlight.key) return
+        huntFlight.pending = null
+        huntFlight.from = null
+        huntFlight.held = false
+        huntFlight.key = key
+        huntFlight.job?.cancel()
+        huntFlight.job = viewModelScope.launch(Dispatchers.Default) {
+            val batch = try {
+                PathTiles.load(
+                    app, samples,
+                    onlineLookup = true,
+                    basemap = basemap,
+                    mapKey = keyFor(basemap),
+                    overlays = overlays,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                PathTiles.Batch(problem = if (basemap.needsKey) MapKeyProblem.FAILED else MapKeyProblem.NONE)
+            }
+            if (isActive && huntFlight.key == key) {
+                noteMapTiles(basemap, batch.problem)
+                _huntZoomIn.value = batch.zoomIn
+                _huntTiles.value = if (batch.zoomIn) emptyList() else batch.tiles
+            }
+        }
+    }
+
+    fun refreshHuntViewport(
+        view: SitPathPlot.Viewport,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+        held: Boolean = false,
+    ) {
+        val bounds = view.coveredBounds()
+        refreshHuntArea(
+            bounds[0], bounds[1], bounds[2], bounds[3], online, basemap, overlays, held,
+        )
+    }
+
+    /** Tiles for the hunt picture, including corners that appear when the map turns. */
+    fun refreshHuntArea(
+        south: Double,
+        north: Double,
+        west: Double,
+        east: Double,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+        held: Boolean = false,
+    ) {
+        refreshArea(
+            huntFlight, _huntTiles, _huntZoomIn, live = false,
+            south, north, west, east, online, basemap, overlays, held,
+        )
+    }
+
+    private class MapFlight {
+        var job: Job? = null
+        var key: String? = null
+        var pending: AreaTicket? = null
+        var from: DoubleArray? = null
+        var held: Boolean = false
+    }
+
+    private data class AreaTicket(
+        val south: Double,
+        val north: Double,
+        val west: Double,
+        val east: Double,
+        val basemap: MapBasemap,
+        val overlays: Set<MapOverlay>,
+        val key: String,
+        val held: Boolean,
+    )
+
+    /**
+     * Drop a screen load and anything waiting behind it. Does not recycle bitmaps.
+     * [prefetch] false leaves the live and hunt look-ahead alone. Reports → Path uses that.
+     */
+    private fun cancelFlight(flight: MapFlight, live: Boolean, prefetch: Boolean = true) {
+        flight.pending = null
+        flight.from = null
+        flight.held = false
+        flight.job?.cancel()
+        flight.job = null
+        flight.key = null
+        if (prefetch) {
+            if (live) stopLivePrefetch() else stopHuntPrefetch()
+        }
+    }
+
+    /**
+     * One screen load at a time. A newer window waits, and only the latest wait is kept.
+     * Pictures already shown stay until a tile for that ground replaces them.
+     */
+    private fun refreshArea(
+        flight: MapFlight,
+        tiles: MutableStateFlow<List<PathTiles.Tile>>,
+        zoomIn: MutableStateFlow<Boolean>,
+        live: Boolean,
+        south: Double,
+        north: Double,
+        west: Double,
+        east: Double,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay>,
+        held: Boolean,
+        prefetch: Boolean = true,
+    ) {
+        if (!online) {
+            cancelFlight(flight, live, prefetch)
+            tiles.value = emptyList()
+            zoomIn.value = false
+            return
+        }
+        if (missingMapKey(basemap)) {
+            cancelFlight(flight, live, prefetch)
+            flight.key = "missing:${basemap.name}:${app.mapKeys.revision.value}"
+            tiles.value = emptyList()
+            zoomIn.value = false
+            noteMapTiles(basemap, MapKeyProblem.MISSING)
+            return
+        }
+        val coverage = PathTiles.coverageKey(south, north, west, east, basemap)
+        val key = tileRequestKey(basemap, overlays, "v:$coverage")
+        if (coverage == "zoom") {
+            cancelFlight(flight, live, prefetch)
+            flight.key = key
+            tiles.value = emptyList()
+            zoomIn.value = true
+            return
+        }
+        if (key.endsWith(":off")) return
+        val ticket = AreaTicket(south, north, west, east, basemap, overlays, key, held)
+        if (key == flight.key) {
+            flight.pending = null
+            flight.held = held
+            if (prefetch && held && flight.job?.isActive != true) {
+                val to = doubleArrayOf(south, north, west, east)
+                val pan = MapLookAhead.panCourse(flight.from, to)
+                if (pan != null) {
+                    flight.from = to
+                    prefetchPan(live, ticket, pan)
+                }
+            }
+            return
+        }
+        if (flight.job?.isActive == true) {
+            flight.pending = ticket
+            if (prefetch) {
+                if (live) stopLivePrefetch() else stopHuntPrefetch()
+            }
+            return
+        }
+        beginArea(flight, tiles, zoomIn, live, ticket, prefetch)
+    }
+
+    private fun beginArea(
+        flight: MapFlight,
+        tiles: MutableStateFlow<List<PathTiles.Tile>>,
+        zoomIn: MutableStateFlow<Boolean>,
+        live: Boolean,
+        ticket: AreaTicket,
+        prefetch: Boolean = true,
+    ) {
+        if (prefetch) {
+            if (live) stopLivePrefetch() else stopHuntPrefetch()
+        }
+        flight.key = ticket.key
+        flight.held = ticket.held
+        flight.job = viewModelScope.launch(Dispatchers.Default) {
+            val batch = try {
+                PathTiles.loadBounds(
+                    app,
+                    south = ticket.south,
+                    north = ticket.north,
+                    west = ticket.west,
+                    east = ticket.east,
+                    onlineLookup = true,
+                    basemap = ticket.basemap,
+                    mapKey = keyFor(ticket.basemap),
+                    overlays = ticket.overlays,
+                    onTile = { tile ->
+                        withContext(Dispatchers.Main.immediate) {
+                            if (flight.key != ticket.key) return@withContext
+                            zoomIn.value = false
+                            tiles.value = mergeShown(tiles.value, ticket, listOf(tile))
+                        }
+                    },
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                PathTiles.Batch(
+                    problem = if (ticket.basemap.needsKey) MapKeyProblem.FAILED else MapKeyProblem.NONE,
+                )
+            }
+            if (!isActive || flight.key != ticket.key) return@launch
+            withContext(Dispatchers.Main.immediate) {
+                if (!isActive || flight.key != ticket.key) return@withContext
+                noteMapTiles(ticket.basemap, batch.problem)
+                zoomIn.value = batch.zoomIn
+                if (batch.zoomIn) {
+                    tiles.value = emptyList()
+                } else if (batch.tiles.isNotEmpty() || tiles.value.firstOrNull()?.basemap != ticket.basemap) {
+                    tiles.value = mergeShown(tiles.value, ticket, batch.tiles)
+                }
+                val next = flight.pending
+                flight.pending = null
+                val to = doubleArrayOf(ticket.south, ticket.north, ticket.west, ticket.east)
+                val pan = if (next == null && flight.held) {
+                    MapLookAhead.panCourse(flight.from, to)
+                } else {
+                    null
+                }
+                flight.from = to
+                if (next != null) {
+                    beginArea(flight, tiles, zoomIn, live, next, prefetch)
+                    return@withContext
+                }
+                if (prefetch && pan != null) prefetchPan(live, ticket, pan)
+            }
+        }
+    }
+
+    /**
+     * Keep tiles that still meet this window plus one screen around it.
+     * The new picture replaces the same ground. Another map's pictures drop.
+     * A closer zoom that sits inside a wider new picture drops too, so the two
+     * do not stack. One older zoom can remain in the gaps.
+     * Bitmaps are not recycled. The canvas may still be drawing the previous list.
+     */
+    private fun mergeShown(
+        shown: List<PathTiles.Tile>,
+        window: AreaTicket,
+        incoming: List<PathTiles.Tile>,
+    ): List<PathTiles.Tile> {
+        if (incoming.isEmpty()) {
+            val shownMap = shown.firstOrNull()?.basemap
+            return if (shownMap != null && shownMap != window.basemap) emptyList() else shown
+        }
+        val latSpan = (window.north - window.south).coerceAtLeast(0.0)
+        val lonSpan = (window.east - window.west).coerceAtLeast(0.0)
+        val keepSouth = window.south - latSpan
+        val keepNorth = window.north + latSpan
+        val keepWest = window.west - lonSpan
+        val keepEast = window.east + lonSpan
+        val fresh = incoming.first()
+        val frontSpan = fresh.east - fresh.west
+        var underlaySpan = Double.NaN
+        for (old in shown.asReversed()) {
+            val span = old.east - old.west
+            if (!PathTiles.sameTileZoom(span, frontSpan)) {
+                underlaySpan = span
+                break
+            }
+        }
+        val kept = ArrayList<PathTiles.Tile>(shown.size + incoming.size)
+        for (old in shown) {
+            if (old.basemap != fresh.basemap || old.overlays != fresh.overlays) continue
+            val inPad = old.north > keepSouth && old.south < keepNorth &&
+                old.east > keepWest && old.west < keepEast
+            val covered = incoming.any { covers(it, old) }
+            if (PathTiles.keepShownPicture(
+                    oldWest = old.west,
+                    oldEast = old.east,
+                    frontSpan = frontSpan,
+                    underlaySpan = underlaySpan,
+                    inPad = inPad,
+                    replaced = incoming.any { sameGround(it, old) },
+                    coveredByWider = covered,
+                )
+            ) {
+                kept += old
+            }
+        }
+        kept += incoming
+        return kept
+    }
+
+    /** [outer] contains [inner], edges included. */
+    private fun covers(outer: PathTiles.Tile, inner: PathTiles.Tile): Boolean {
+        return outer.south <= inner.south && outer.north >= inner.north &&
+            outer.west <= inner.west && outer.east >= inner.east
+    }
+
+    private fun sameGround(a: PathTiles.Tile, b: PathTiles.Tile): Boolean {
+        return a.north == b.north && a.south == b.south && a.west == b.west && a.east == b.east
+    }
+
+    /** Save one screen along a finger drag. This does not move the travel-ahead course. */
+    private fun prefetchPan(live: Boolean, ticket: AreaTicket, courseDeg: Double) {
+        val box = MapLookAhead.boxes(
+            ticket.south, ticket.north, ticket.west, ticket.east, courseDeg, 0.0,
+        ).firstOrNull() ?: return
+        val coverage = PathTiles.coverageKey(box[0], box[1], box[2], box[3], ticket.basemap)
+        if (coverage == "zoom" || coverage == "off") return
+        val key = tileRequestKey(ticket.basemap, ticket.overlays, "pan:$coverage")
+        val currentKey = if (live) livePrefetchKey else huntPrefetchKey
+        val currentJob = if (live) livePrefetchJob else huntPrefetchJob
+        if (key == currentKey && currentJob?.isActive == true) return
+        if (live) {
+            livePrefetchKey = key
+            livePrefetchJob?.cancel()
+        } else {
+            huntPrefetchKey = key
+            huntPrefetchJob?.cancel()
+        }
+        val job = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                PathTiles.prefetch(
+                    app,
+                    south = box[0],
+                    north = box[1],
+                    west = box[2],
+                    east = box[3],
+                    onlineLookup = true,
+                    basemap = ticket.basemap,
+                    mapKey = keyFor(ticket.basemap),
+                    overlays = ticket.overlays,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+        }
+        if (live) livePrefetchJob = job else huntPrefetchJob = job
+    }
+
+    /** Save the next screen along the course. A held view does not call this. */
+    fun prefetchLivePath(
+        south: Double,
+        north: Double,
+        west: Double,
+        east: Double,
+        courseDeg: Double,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+    ) {
+        prefetchFollow(
+            live = true,
+            south = south,
+            north = north,
+            west = west,
+            east = east,
+            courseDeg = courseDeg,
+            online = online,
+            basemap = basemap,
+            overlays = overlays,
+        )
+    }
+
+    /** Save the next screen under a following Hunt map. A held view does not call this. */
+    fun prefetchHunt(
+        south: Double,
+        north: Double,
+        west: Double,
+        east: Double,
+        courseDeg: Double,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay> = emptySet(),
+    ) {
+        prefetchFollow(
+            live = false,
+            south = south,
+            north = north,
+            west = west,
+            east = east,
+            courseDeg = courseDeg,
+            online = online,
+            basemap = basemap,
+            overlays = overlays,
+        )
+    }
+
+    fun stopLivePrefetch() {
+        livePrefetchJob?.cancel()
+        livePrefetchJob = null
+        livePrefetchKey = null
+    }
+
+    fun stopHuntPrefetch() {
+        huntPrefetchJob?.cancel()
+        huntPrefetchJob = null
+        huntPrefetchKey = null
+    }
+
+    private fun prefetchFollow(
+        live: Boolean,
+        south: Double,
+        north: Double,
+        west: Double,
+        east: Double,
+        courseDeg: Double,
+        online: Boolean,
+        basemap: MapBasemap,
+        overlays: Set<MapOverlay>,
+    ) {
+        if (!online || !courseDeg.isFinite() || missingMapKey(basemap)) {
+            if (live) stopLivePrefetch() else stopHuntPrefetch()
+            return
+        }
+        val prior = if (live) livePrefetchCourse else huntPrefetchCourse
+        val turn = MapLookAhead.turnDegrees(prior, courseDeg)
+        // Keep the earlier course while a turn is still small, so a slow swing can add up.
+        if (!prior.isFinite() || turn <= -MapLookAhead.TURN_DEG || turn >= MapLookAhead.TURN_DEG) {
+            if (live) livePrefetchCourse = courseDeg else huntPrefetchCourse = courseDeg
+        }
+        val boxes = MapLookAhead.boxes(south, north, west, east, courseDeg, turn).filter { box ->
+            val coverage = PathTiles.coverageKey(box[0], box[1], box[2], box[3], basemap)
+            coverage != "zoom" && coverage != "off"
+        }
+        if (boxes.isEmpty()) return
+        val key = boxes.joinToString("|") { box ->
+            PathTiles.coverageKey(box[0], box[1], box[2], box[3], basemap)
+        }.let { tileRequestKey(basemap, overlays, "ahead:$it") }
+        val current = if (live) livePrefetchKey else huntPrefetchKey
+        if (key == current) return
+        if (live) {
+            livePrefetchKey = key
+            livePrefetchJob?.cancel()
+        } else {
+            huntPrefetchKey = key
+            huntPrefetchJob?.cancel()
+        }
+        val job = viewModelScope.launch(Dispatchers.Default) {
+            for (box in boxes) {
+                if (!isActive) return@launch
+                try {
+                    PathTiles.prefetch(
+                        app,
+                        south = box[0],
+                        north = box[1],
+                        west = box[2],
+                        east = box[3],
+                        onlineLookup = true,
+                        basemap = basemap,
+                        mapKey = keyFor(basemap),
+                        overlays = overlays,
+                    )
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+            }
+        }
+        if (live) livePrefetchJob = job else huntPrefetchJob = job
+    }
+
+    fun mapKey(basemap: MapBasemap): String {
+        val service = basemap.service ?: return ""
+        return app.mapKeys.read(service).orEmpty()
+    }
+
+    /** Picks the map. A keyed map with nothing saved asks for the key. */
+    fun selectMap(choice: MapBasemap) {
+        viewModelScope.launch {
+            val prev = app.config.settings.mapBasemap
+            if (choice != prev) {
+                app.config.update { it.copy(settings = it.settings.copy(mapBasemap = choice)) }
+            }
+            silencedMapNotice = null
+            _mapNotice.value = null
+            if (missingMapKey(choice)) noteMapTiles(choice, MapKeyProblem.MISSING)
+        }
+    }
+
+    /** Deletes saved map pictures. Plate readers and other sensors stay. */
+    fun clearSavedMaps() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { PathTiles.clearSaved(app) }
+        }
+    }
+
+    /**
+     * Writes a finished key, or says why it was not kept.
+     * A short draft does not replace a key that is already stored.
+     */
+    fun finishMapKey(basemap: MapBasemap, raw: String) {
+        val service = basemap.service ?: return
+        when (MapKey.verdict(raw)) {
+            MapKey.Verdict.OK -> {
+                if (app.mapKeys.save(service, raw)) {
+                    if (silencedMapNotice?.basemap?.service == service) silencedMapNotice = null
+                    if (_mapNotice.value?.basemap?.service == service) _mapNotice.value = null
+                } else {
+                    noteMapTiles(basemap, MapKeyProblem.DENIED)
+                }
+            }
+            MapKey.Verdict.EMPTY -> {
+                app.mapKeys.clear(service)
+                noteMapTiles(basemap, MapKeyProblem.MISSING)
+            }
+            MapKey.Verdict.SHORT, MapKey.Verdict.DENIED -> noteMapTiles(basemap, MapKeyProblem.DENIED)
+        }
+    }
+
+    fun dismissMapNotice() {
+        silencedMapNotice = _mapNotice.value
+        _mapNotice.value = null
+    }
+
+    private fun keyFor(basemap: MapBasemap): String? {
+        val service = basemap.service ?: return null
+        return MapKey.accept(app.mapKeys.read(service))
+    }
+
+    private fun missingMapKey(basemap: MapBasemap): Boolean = basemap.needsKey && keyFor(basemap) == null
+
+    private fun tileRequestKey(basemap: MapBasemap, overlays: Set<MapOverlay>, body: String): String =
+        "${app.mapKeys.revision.value}:${basemap.name}:${MapOverlay.key(overlays)}:$body"
+
+    private fun noteMapTiles(basemap: MapBasemap, problem: MapKeyProblem) {
+        if (problem == MapKeyProblem.NONE || !basemap.needsKey) return
+        val notice = MapKeyNotice(basemap, problem)
+        if (notice == silencedMapNotice || _mapNotice.value == notice) return
+        _mapNotice.value = notice
+    }
+
     fun toggleFleetName() {
         viewModelScope.launch {
             app.config.update {
@@ -809,7 +2048,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         displayPaused.value = !displayPaused.value
     }
 
-    fun defaultSitName(): String = Sit.defaultName(System.currentTimeMillis())
+    fun defaultSitName(): String = Sit.defaultName(System.currentTimeMillis(), LanguageText.dateLocale())
 
     fun startSit(name: String) {
         viewModelScope.launch {
@@ -849,24 +2088,39 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startSitCompare() {
         if (_export.value.active) return
         viewModelScope.launch {
-            publishExport(0.08f, "Writing sit compare…")
+            val writing = LanguageText.text("ui.writing.sit.compare")
             runCatching {
-                val doc = sitCompareDoc()
-                publishExport(0.85f, "Writing sit compare…")
+                val doc = sitCompareDoc(0.30f, writing)
+                val dir = File(app.cacheDir, "debrief")
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date())
+                val file = File(dir, "fieldwatch-sit-compare-$stamp.txt")
+                withContext(Dispatchers.IO) {
+                    dir.mkdirs()
+                    doc.writePlainText(file) { frac ->
+                        if (!isActive) throw CancellationException()
+                        kotlinx.coroutines.runBlocking {
+                            publishExport(0.32f + 0.66f * frac, writing)
+                        }
+                    }
+                }
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
+                    clipData = ClipData.newRawUri("sit-compare", uri)
+                    putExtra(Intent.EXTRA_STREAM, uri)
                     putExtra(Intent.EXTRA_SUBJECT, compareSubject(doc))
-                    putExtra(Intent.EXTRA_TEXT, doc.toPlainText())
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }.onSuccess { intent ->
                 _export.value = ExportUi(
                     active = false,
                     progress = 1f,
                     share = intent,
-                    shareTitle = "Sit compare",
+                    shareTitle = LanguageText.text("ui.sit.compare.2"),
                 )
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not write sit compare")
+                _export.value = ExportUi(error = exportError(err, "ui.could.not.write.sit"))
             }
         }
     }
@@ -874,23 +2128,20 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startSitComparePdf() {
         if (_export.value.active) return
         viewModelScope.launch {
-            publishExport(0.06f, "Writing sit compare PDF…")
+            val writing = LanguageText.text("ui.writing.sit.compare.pdf")
+            val laying = LanguageText.text("ui.laying.out.sit.compare")
             runCatching {
-                val doc = sitCompareDoc()
-                publishExport(0.35f, "Laying out sit compare PDF…")
+                val doc = sitCompareDoc(0.28f, writing)
+                publishExport(0.30f, LanguageText.text("ui.loading.map.tiles"))
                 val dir = File(app.cacheDir, "debrief").apply { mkdirs() }
                 val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
                     .format(java.util.Date())
                 val file = File(dir, "fieldwatch-sit-compare-$stamp.pdf")
-                publishExport(0.32f, "Loading map tiles…")
                 val tiles = pathTilesForFigure(doc.pathFigure)
                 val extraTiles = doc.extraFigures.map { pathTilesForFigure(it) }
+                publishExport(0.38f, laying)
                 withContext(Dispatchers.Default) {
-                    DebriefPdf.write(doc, file, tiles, extraTiles) { p ->
-                        kotlinx.coroutines.runBlocking {
-                            publishExport(0.38f + 0.55f * p, "Writing sit compare PDF…")
-                        }
-                    }
+                    DebriefPdf.write(doc, file, tiles, extraTiles, reportPdf(0.38f, 0.60f, laying, writing))
                 }
                 val uri: Uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
                 Intent(Intent.ACTION_SEND).apply {
@@ -905,27 +2156,32 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     active = false,
                     progress = 1f,
                     share = intent,
-                    shareTitle = "Sit compare PDF",
+                    shareTitle = LanguageText.text("ui.sit.compare.pdf"),
                 )
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not write sit compare PDF")
+                _export.value = ExportUi(error = exportError(err, "ui.could.not.write.sit.2"))
             }
         }
     }
 
     private fun compareSubject(doc: DebriefDoc): String =
         if (doc.windowLine.isNotBlank()) "sw33p3r_ sit compare — ${doc.windowLine}"
-        else "sw33p3r_ sit compare"
+        else LanguageText.text("ui.fieldwatch.sit.compare")
 
     fun startSitCompareAiExport() {
         if (_export.value.active) return
         viewModelScope.launch {
-            publishExport(0.08f, "Building compare AI export…")
+            val building = LanguageText.text("ui.building.compare.ai.export")
             runCatching {
-                val (thisSide, second) = compareSides()
-                publishExport(0.45f, "Building compare AI export…")
+                val (thisSide, second) = compareSides(0.34f, building)
+                val demo = app.config.settings.demoMode
                 val text = withContext(Dispatchers.Default) {
-                    SitDiffPrompt.build(thisSide, second, app.config.settings.demoMode)
+                    SitDiffPrompt.build(thisSide, second, demo) { frac ->
+                        if (!isActive) throw CancellationException()
+                        kotlinx.coroutines.runBlocking {
+                            publishExport(0.36f + 0.60f * frac, building)
+                        }
+                    }
                 }
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
@@ -940,46 +2196,72 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     active = false,
                     progress = 1f,
                     share = intent,
-                    shareTitle = "Sit compare AI Export",
+                    shareTitle = LanguageText.text("ui.sit.compare.ai.export"),
                 )
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not write compare AI export")
+                _export.value = ExportUi(error = err.message ?: LanguageText.text("ui.could.not.write.compare"))
             }
         }
     }
 
-    private suspend fun sitCompareDoc(): DebriefDoc {
-        val (thisSide, second) = compareSides()
-        val radios = thisSide.radios + second.radios
-        return SitDiff.document(
-            thisSide,
-            second,
-            RadioBookmarks.watchedFleetIds(app.config.watchlist),
-            showAllRadios = app.config.settings.debriefShowAllRadios,
-        )
-            .withDemoMacs(radios.map { it.mac }, app.config.settings.demoMode, radios.map { it.payloadUasId })
+    /**
+     * [roof] is how far reading the sits and building the compare may move the bar.
+     * The text file or the PDF after this owns the rest, because that is the long part.
+     */
+    private suspend fun sitCompareDoc(roof: Float, work: String): DebriefDoc {
+        val (thisSide, second) = compareSides(roof * 0.62f, work)
+        val watched = RadioBookmarks.watchedFleetIds(app.config.watchlist)
+        val showAll = app.config.settings.debriefShowAllRadios
+        val demo = app.config.settings.demoMode
+        val from = roof * 0.64f
+        publishExport(from, work)
+        return withContext(Dispatchers.Default) {
+            var last = from
+            val doc = SitDiff.document(
+                thisSide,
+                second,
+                watched,
+                showAllRadios = showAll,
+                onProgress = tick@{ fraction ->
+                    if (!isActive) throw CancellationException()
+                    val p = from + (roof - from) * fraction.coerceIn(0f, 1f)
+                    if (p < last + 0.01f && fraction < 0.999f) return@tick
+                    last = p
+                    kotlinx.coroutines.runBlocking { publishExport(p, work) }
+                },
+            )
+            val radios = thisSide.radios + second.radios
+            doc.withDemoMacs(radios.map { it.mac }, demo, radios.map { it.payloadUasId })
+        }
     }
 
-    private suspend fun compareSides(): Pair<SitDiff.Side, SitDiff.Side> {
+    private suspend fun compareSides(roof: Float, work: String): Pair<SitDiff.Side, SitDiff.Side> {
         val sit = app.sits.ui.value
-        val otherId = sit.compareId ?: error("Pick a second sit.")
+        val otherId = sit.compareId ?: error(LanguageText.text("ui.pick.second.sit"))
+        publishExport(0.04f, work)
         val otherFile = withContext(Dispatchers.IO) { app.sits.sitFile(otherId) }
-            ?: error("Could not read that sit.")
+            ?: error(LanguageText.text("ui.could.not.read.sit"))
         val fleets = app.config.fleets
         val customNames = RadioBookmarks.labels(app.config.watchlist)
         val observerNotes = RadioBookmarks.notes(app.config.watchlist)
         val bookmarkedKeys = RadioBookmarks.alertDeviceKeys(app.config.watchlist)
         val mineKeys = RadioBookmarks.mineKeys(app.config.watchlist)
-        val thisSide = compareThisSide(sit, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
+        val start = 0.06f.coerceAtMost(roof)
+        val mid = start + (roof - start) * 0.5f
+        val secondRadios = mapRadios(otherFile.radios, start, mid, work) {
+            SitDiff.fromSitRadio(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
+        }
         val second = SitDiff.Side(
             name = otherFile.summary.name,
             ram = false,
-            radios = otherFile.radios.map {
-                SitDiff.fromSitRadio(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
-            },
+            radios = secondRadios,
             path = otherFile.operatorPath,
             floods = otherFile.floods,
             gnss = otherFile.gnss,
+        )
+        val thisSide = compareThisSide(
+            sit, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys,
+            from = mid, to = roof, work = work,
         )
         return thisSide to second
     }
@@ -991,16 +2273,20 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         observerNotes: Map<String, String>,
         bookmarkedKeys: Set<String>,
         mineKeys: Set<String>,
+        from: Float,
+        to: Float,
+        work: String,
     ): SitDiff.Side {
         val open = sit.open
         if (open != null) {
             val source = app.sits.debriefSource()
+            val radios = mapRadios(source?.devices.orEmpty(), from, to, work) {
+                SitDiff.fromSighting(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
+            }
             return SitDiff.Side(
                 name = open.name,
                 ram = false,
-                radios = source?.devices.orEmpty().map {
-                    SitDiff.fromSighting(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
-                },
+                radios = radios,
                 path = source?.operatorPath.orEmpty(),
                 floods = source?.floods.orEmpty(),
                 gnss = source?.gnss.orEmpty(),
@@ -1008,14 +2294,16 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
         val selected = sit.closed.firstOrNull { it.id == sit.selectedId }
         if (selected != null) {
+            publishExport(from, work)
             val file = withContext(Dispatchers.IO) { app.sits.sitFile(selected.id) }
-                ?: error("Could not read this sit.")
+                ?: error(LanguageText.text("ui.could.not.read.this.sit"))
+            val radios = mapRadios(file.radios, from, to, work) {
+                SitDiff.fromSitRadio(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
+            }
             return SitDiff.Side(
                 name = selected.name,
                 ram = false,
-                radios = file.radios.map {
-                    SitDiff.fromSitRadio(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
-                },
+                radios = radios,
                 path = file.operatorPath,
                 floods = file.floods,
                 gnss = file.gnss,
@@ -1023,12 +2311,13 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
         val now = System.currentTimeMillis()
         val since = now - DebriefPrompt.WINDOW_MS
+        val radios = mapRadios(app.devices.devices.value, from, to, work) {
+            SitDiff.fromSighting(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
+        }
         return SitDiff.Side(
-            name = "Last 15 minutes",
+            name = LanguageText.text("ui.last.15.minutes"),
             ram = true,
-            radios = app.devices.devices.value.map {
-                SitDiff.fromSighting(it, fleets, customNames, observerNotes, bookmarkedKeys, mineKeys)
-            },
+            radios = radios,
             path = app.operatorPathCopy().filter { it.at >= since },
             floods = app.floodBursts().filter { it.at >= since },
             gnss = app.gnss.marks().filter { it.at >= since || it.endedAt >= since },
@@ -1142,18 +2431,39 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startSignatureCandidates() {
         if (_candidates.value.loading) return
         viewModelScope.launch {
-            _candidates.value = CandidatesUi(loading = true)
+            _candidates.value = CandidatesUi(
+                loading = true,
+                progress = 0f,
+                message = LanguageText.text("ui.reading.log"),
+            )
+            yield()
             runCatching {
-                val radios = app.logs.readRadios()
+                val radios = app.logs.readRadios { copied, total ->
+                    val fraction = (copied.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+                    publishCandidates(
+                        fraction * 0.9f,
+                        "Reading the log · ${copied / 1024} KB of ${total / 1024} KB",
+                    )
+                }
+                publishCandidates(0.92f, LanguageText.text("ui.matching.catalog"))
                 withContext(Dispatchers.Default) {
                     SignatureCandidates.analyze(radios, app.config.fleets)
                 }
             }.onSuccess { report ->
                 _candidates.value = CandidatesUi(report = report)
             }.onFailure { err ->
-                _candidates.value = CandidatesUi(error = err.message ?: "Could not read the log")
+                _candidates.value = CandidatesUi(error = err.message ?: LanguageText.text("ui.could.not.read.log"))
             }
         }
+    }
+
+    private suspend fun publishCandidates(progress: Float, message: String) {
+        withContext(Dispatchers.Main.immediate) {
+            val cur = _candidates.value
+            if (!cur.loading) return@withContext
+            _candidates.value = cur.copy(progress = progress.coerceIn(0f, 1f), message = message)
+        }
+        yield()
     }
 
     fun beginNewFleet() {
@@ -1209,7 +2519,212 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     decaySec = next.decaySec,
                 )
             }
-            if (next.alertVoice || next.gnssVoice) app.alerter.prepareVoice()
+            if (next.alertVoice || next.gnssVoice || next.trustedVoice || next.cellVoice || next.anySensorAlert()) {
+                app.alerter.prepareVoice()
+            }
+            app.announceCell()
+            if (layerAlertsChanged(prev, next)) {
+                app.syncFlock(force = prev.flockLayer != next.flockLayer || prev.sensorLayer != next.sensorLayer)
+            }
+        }
+    }
+
+    fun setFlockLayer(on: Boolean) = setSensorList(SensorList.PLATES, on)
+
+    fun setSensorLayer(on: Boolean) = setSensorList(SensorList.OTHER, on)
+
+    fun updateFlockLayer() = updateSensorList(SensorList.PLATES)
+
+    fun updateSensorLayer() = updateSensorList(SensorList.OTHER)
+
+    fun confirmFlockDownload() = confirmSensorDownload(SensorList.PLATES)
+
+    fun confirmSensorDownload() = confirmSensorDownload(SensorList.OTHER)
+
+    fun dismissFlockDownload() = dismissSensorDownload(SensorList.PLATES)
+
+    fun dismissSensorDownload() = dismissSensorDownload(SensorList.OTHER)
+
+    private fun layerFlow(list: SensorList): MutableStateFlow<FlockLayerUi> =
+        if (list == SensorList.PLATES) _flockLayer else _sensorLayer
+
+    private fun setSensorList(list: SensorList, on: Boolean) {
+        val flow = layerFlow(list)
+        if (flow.value.busy) return
+        if (!on) {
+            flow.update { it.note(null) }
+            updateSettings { if (list == SensorList.PLATES) it.copy(flockLayer = false) else it.copy(sensorLayer = false) }
+            return
+        }
+        val saved = runCatching { FlockFiles.peek(app.filesDir, list) }.getOrNull()
+        if (saved != null || flow.value.savedAt > 0L) {
+            flow.update { it.note(null) }
+            updateSettings { if (list == SensorList.PLATES) it.copy(flockLayer = true) else it.copy(sensorLayer = true) }
+            return
+        }
+        if (!PlaceLookup.online(app)) {
+            flow.update { it.note("settings.layer.needs.network") }
+            return
+        }
+        flow.update { it.note(null, confirm = true) }
+    }
+
+    private fun updateSensorList(list: SensorList) {
+        val flow = layerFlow(list)
+        val enabled = if (list == SensorList.PLATES) app.config.settings.flockLayer else app.config.settings.sensorLayer
+        if (flow.value.busy || !enabled) return
+        viewModelScope.launch {
+            try {
+                if (!PlaceLookup.online(app)) {
+                    flow.update { it.note("settings.layer.needs.network") }
+                    return@launch
+                }
+                val header = withContext(Dispatchers.IO) { FlockFiles.peek(app.filesDir, list) }
+                if (list.refillFlockOnly && header != null && header.version < FlockFiles.ALL_PLATES) {
+                    flow.update { it.note(null, confirm = true, confirmUpdate = true) }
+                    return@launch
+                }
+                when (val probe = withContext(Dispatchers.IO) { FlockFiles.probe(app.filesDir, list) }) {
+                    FlockFiles.Probe.Same ->
+                        flow.update { it.note("settings.layer.current") }
+                    FlockFiles.Probe.Changed ->
+                        flow.update { it.note(null, confirm = true, confirmUpdate = true) }
+                    is FlockFiles.Probe.Failed ->
+                        flow.update { it.fail(probe.reason, probe.code, keep = true) }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (error: Exception) {
+                flow.update { it.fail(FlockFiles.failReason(error), keep = true) }
+            }
+        }
+    }
+
+    private fun confirmSensorDownload(list: SensorList) {
+        val flow = layerFlow(list)
+        if (flow.value.busy) return
+        flow.update {
+            it.note(null).copy(busy = true, percent = 0, processing = false)
+        }
+        viewModelScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    FlockFiles.download(app.filesDir, list) { pct ->
+                        flow.update { row ->
+                            if (pct >= 100) row.copy(processing = true) else row.copy(percent = pct)
+                        }
+                    }
+                }
+                when (result) {
+                    is FlockFiles.Fetch.Saved -> {
+                        flow.update {
+                            it.note(null).copy(
+                                busy = false,
+                                processing = false,
+                                percent = 100,
+                                savedAt = result.savedAt,
+                                fullList = true,
+                            )
+                        }
+                        val already = if (list == SensorList.PLATES) {
+                            app.config.settings.flockLayer
+                        } else {
+                            app.config.settings.sensorLayer
+                        }
+                        if (already) app.syncFlock(force = true)
+                        else updateSettings {
+                            if (list == SensorList.PLATES) it.copy(flockLayer = true) else it.copy(sensorLayer = true)
+                        }
+                    }
+                    FlockFiles.Fetch.Current -> {
+                        val had = runCatching { FlockFiles.peek(app.filesDir, list) != null }.getOrDefault(false)
+                        flow.update {
+                            it.note(if (had) "settings.layer.current" else "settings.layer.failed.first")
+                                .copy(busy = false, processing = false)
+                        }
+                    }
+                    is FlockFiles.Fetch.Failed -> sensorDownloadFailed(list, result.reason, result.code)
+                }
+            } catch (e: CancellationException) {
+                flow.update { it.copy(busy = false, processing = false) }
+                throw e
+            } catch (error: Exception) {
+                sensorDownloadFailed(list, FlockFiles.failReason(error), 0)
+            }
+        }
+    }
+
+    /** A failed download names the reason and leaves the row usable. A saved copy stays. */
+    private fun sensorDownloadFailed(list: SensorList, reason: FlockFiles.Reason, code: Int) {
+        val had = runCatching { FlockFiles.peek(app.filesDir, list) != null }.getOrDefault(false)
+        layerFlow(list).update {
+            it.fail(reason, code, keep = had).copy(busy = false, processing = false)
+        }
+    }
+
+    private fun FlockLayerUi.note(
+        key: String?,
+        code: String = "",
+        keep: Boolean = false,
+        confirm: Boolean = false,
+        confirmUpdate: Boolean = false,
+    ) = copy(
+        noticeKey = key,
+        noticeCode = code,
+        noticeKeep = keep,
+        confirm = confirm,
+        confirmUpdate = confirmUpdate,
+    )
+
+    private fun FlockLayerUi.fail(reason: FlockFiles.Reason, code: Int = 0, keep: Boolean) = note(
+        layerFailKey(reason, code),
+        code = if (reason == FlockFiles.Reason.SERVER && code > 0) code.toString() else "",
+        keep = keep,
+    )
+
+    private fun layerFailKey(reason: FlockFiles.Reason, code: Int): String = when (reason) {
+        FlockFiles.Reason.REACH -> "settings.layer.failed.reach"
+        FlockFiles.Reason.TRUST -> "settings.layer.failed.trust"
+        FlockFiles.Reason.SERVER ->
+            if (code > 0) "settings.layer.failed.server.code" else "settings.layer.failed.server"
+        FlockFiles.Reason.SPACE -> "settings.layer.failed.space"
+        FlockFiles.Reason.LARGE -> "settings.layer.failed.large"
+        FlockFiles.Reason.EMPTY -> "settings.layer.failed.empty"
+        FlockFiles.Reason.READ -> "settings.layer.failed.read"
+        FlockFiles.Reason.SAVE -> "settings.layer.failed.save"
+        FlockFiles.Reason.OTHER -> "settings.layer.failed.first"
+    }
+
+    private fun dismissSensorDownload(list: SensorList) {
+        layerFlow(list).update { it.copy(confirm = false) }
+    }
+
+    private fun layerAlertsChanged(prev: AppSettings, next: AppSettings): Boolean {
+        return prev.flockLayer != next.flockLayer ||
+            prev.sensorLayer != next.sensorLayer ||
+            prev.flockAlert != next.flockAlert ||
+            prev.speedAlert != next.speedAlert ||
+            prev.redAlert != next.redAlert ||
+            prev.gunshotAlert != next.gunshotAlert ||
+            prev.cameraAlert != next.cameraAlert
+    }
+
+    /** New install tag. A typed callsign stays. Blank keeps meaning Fieldwatch- plus the tag. */
+    fun regenerateTakTag() {
+        viewModelScope.launch {
+            val cur = app.config.config.value
+            val oldTag = cur.takInstallTag
+            val settings = cur.settings
+            if (settings.takEnabled && !settings.demoMode) {
+                app.tak.retireTag(
+                    oldTag,
+                    TakInstall.callsign(settings.takCallsign, oldTag),
+                    settings,
+                )
+            }
+            var next = TakInstall.newTag()
+            if (next == TakInstall.clean(oldTag)) next = TakInstall.newTag()
+            app.config.update { cfg -> cfg.copy(takInstallTag = next) }
         }
     }
 
@@ -1246,6 +2761,80 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
 
     fun isMine(deviceKey: String): Boolean =
         app.config.watchlist.any { it.deviceKey == deviceKey && it.mine }
+
+    /** Place lines for this radio. Empty when Places is off or the address cannot be kept. */
+    fun placeLines(device: Sighting, streets: Map<String, String> = emptyMap()): List<String> {
+        val settings = app.config.settings
+        if (!settings.placeWatch) return emptyList()
+        val named = if (settings.demoMode || !settings.onlineLookup) emptyMap() else streets
+        return app.places.linesFor(
+            device,
+            app.config.fleets,
+            RadioBookmarks.mineKeys(app.config.watchlist),
+            System.currentTimeMillis(),
+            demo = settings.demoMode,
+            streets = named,
+        )
+    }
+
+    /** Fill street names for this radio's places when Online place names is on. */
+    fun refreshPlaceStreets(device: Sighting) {
+        viewModelScope.launch { streetsForDevice(device) }
+    }
+
+    /** Place records for Reports. Empty when Places is off, so the page does not list a hidden file. */
+    fun placeRecords(): List<PlaceMemory.Record> {
+        if (!app.config.settings.placeWatch) return emptyList()
+        return app.places.snapshot()
+    }
+
+    /**
+     * Street names for the places report. The geocoder names up to eight stops per pass.
+     * Coordinates stay on the row when a street is not ready.
+     */
+    fun refreshPlaceReportStreets() {
+        viewModelScope.launch {
+            val settings = app.config.settings
+            if (!settings.placeWatch || !settings.onlineLookup || settings.demoMode) return@launch
+            val now = System.currentTimeMillis()
+            val points = placeLookupFixes(app.places.snapshot(), now).map { it.lat to it.lon }
+            if (points.isEmpty()) return@launch
+            val missing = points.filter { (lat, lon) -> Geo.cellKey(lat, lon) !in _placeStreets.value }
+            if (missing.isEmpty()) return@launch
+            val found = PlaceLookup.namesAt(app, missing)
+            if (found.isNotEmpty()) _placeStreets.update { it + found }
+        }
+    }
+
+    private suspend fun streetsForDevice(device: Sighting): Map<String, String> {
+        val settings = app.config.settings
+        if (!settings.placeWatch || !settings.onlineLookup || settings.demoMode) return emptyMap()
+        val points = app.places.placePoints(
+            device,
+            app.config.fleets,
+            RadioBookmarks.mineKeys(app.config.watchlist),
+            System.currentTimeMillis(),
+        )
+        if (points.isEmpty()) return _placeStreets.value
+        val missing = points.filter { (lat, lon) -> Geo.cellKey(lat, lon) !in _placeStreets.value }
+        if (missing.isEmpty()) return _placeStreets.value
+        val found = PlaceLookup.namesAt(app, missing)
+        if (found.isNotEmpty()) _placeStreets.update { it + found }
+        return _placeStreets.value
+    }
+
+    private fun placeLookupFixes(records: List<PlaceMemory.Record>, now: Long): List<PlaceLookup.Fix> {
+        val out = ArrayList<PlaceLookup.Fix>()
+        val ranked = records.sortedByDescending { PlaceMemory.placeCount(it, now) }
+        for (record in ranked) {
+            val places = PlaceMemory.placesInWindow(record, now)
+            if (places.size < PlaceMemory.MIN_PLACES) continue
+            for (place in places) {
+                out += PlaceLookup.Fix("Place", place.lat, place.lon, namedOnly = true)
+            }
+        }
+        return out
+    }
 
     fun setRadioMine(device: Sighting, on: Boolean) {
         viewModelScope.launch {
@@ -1334,6 +2923,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun restoreDefaults() {
         viewModelScope.launch {
             app.config.restoreDefaults()
+            app.syncFlock()
             app.syncLocationUpdates()
             app.syncArrivals(false)
             app.devices.refresh(
@@ -1375,15 +2965,15 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "application/json"
                     clipData = ClipData.newRawUri("signatures", uri)
                     putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ signatures")
+                    putExtra(Intent.EXTRA_SUBJECT, LanguageText.text("ui.fieldwatch.signatures"))
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }.onSuccess { intent ->
-                _export.value = ExportUi(share = intent, shareTitle = "sw33p3r_ signatures")
+                _export.value = ExportUi(share = intent, shareTitle = LanguageText.text("ui.fieldwatch.signatures"))
             }.onFailure { err ->
                 _export.value = ExportUi(
-                    error = err.message ?: "Could not export signatures",
-                    errorTitle = "Could not export signatures",
+                    error = err.message ?: LanguageText.text("ui.could.not.export.signatures"),
+                    errorTitle = LanguageText.text("ui.could.not.export.signatures"),
                 )
             }
         }
@@ -1396,49 +2986,205 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 withContext(Dispatchers.IO) {
                     app.contentResolver.openOutputStream(uri)?.use { out ->
                         out.write(json.toByteArray(Charsets.UTF_8))
-                    } ?: error("Could not write to the location you picked.")
+                    } ?: error(LanguageText.text("ui.could.not.write.location"))
                 }
             }.onSuccess {
                 _export.value = ExportUi(
-                    noticeTitle = "Signatures saved",
-                    noticeMessage = "The pack was written to the folder you picked. Share it with another sw33p3r_ or keep it as a backup before Restore defaults.",
+                    noticeTitle = LanguageText.text("ui.signatures.saved"),
+                    noticeMessage = LanguageText.text("ui.pack.was.written.folder"),
                 )
             }.onFailure { err ->
                 _export.value = ExportUi(
-                    error = err.message ?: "Could not save signatures",
-                    errorTitle = "Could not save signatures",
+                    error = err.message ?: LanguageText.text("ui.could.not.save.signatures"),
+                    errorTitle = LanguageText.text("ui.could.not.save.signatures"),
                 )
             }
         }
     }
 
+
+    fun checkForAppUpdate() {
+        if (appUpdateJob?.isActive == true) return
+        val token = ++appUpdateToken
+        appUpdateJob = viewModelScope.launch {
+            _appUpdate.value = AppUpdatePrompt.Checking
+            val prompt = try {
+                lookForAppUpdate(fromSettings = true) ?: AppUpdatePrompt.Unreachable
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                AppUpdatePrompt.Unreachable
+            }
+            if (token != appUpdateToken) return@launch
+            if (_appUpdate.value !is AppUpdatePrompt.Checking) return@launch
+            if (prompt is AppUpdatePrompt.Offer) offeredUpdate = prompt.note
+            _appUpdate.value = prompt
+        }
+    }
+
+    fun installOfferedUpdate() {
+        val note = (_appUpdate.value as? AppUpdatePrompt.Offer)?.note ?: offeredUpdate ?: return
+        if (_appUpdate.value is AppUpdatePrompt.Downloading) return
+        offeredUpdate = note
+        val token = ++appUpdateToken
+        appUpdateJob = viewModelScope.launch {
+            val cached = try {
+                withContext(Dispatchers.IO) {
+                    downloadedApk?.takeIf {
+                        AppUpdateInstall.trusted(app, it, note.versionCode, note.versionName)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (token != appUpdateToken) return@launch
+            if (cached != null) {
+                presentDownloadedUpdate(cached)
+                return@launch
+            }
+            _appUpdate.value = AppUpdatePrompt.Downloading
+            val file = try {
+                withContext(Dispatchers.IO) {
+                    val got = AppUpdateClient.downloadApk(
+                        app.cacheDir,
+                        userAgent = updateUserAgent(),
+                    ) { token == appUpdateToken }
+                    if (token != appUpdateToken) return@withContext null
+                    if (got == null || !AppUpdateInstall.trusted(app, got, note.versionCode, note.versionName)) {
+                        got?.delete()
+                        null
+                    } else {
+                        got
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+            if (token != appUpdateToken) return@launch
+            if (file == null) {
+                _appUpdate.value = AppUpdatePrompt.Failed
+                return@launch
+            }
+            presentDownloadedUpdate(file)
+        }
+    }
+
+    private fun presentDownloadedUpdate(file: File) {
+        downloadedApk = file
+        if (!AppUpdateInstall.allowed(app)) {
+            _appUpdate.value = AppUpdatePrompt.Allow
+            return
+        }
+        _appUpdateIntent.value = AppUpdateInstall.viewIntent(app, file)
+        _appUpdate.value = null
+    }
+
+    fun laterAppUpdate() {
+        val code = (_appUpdate.value as? AppUpdatePrompt.Offer)?.note?.versionCode ?: offeredUpdate?.versionCode
+        appUpdateToken++
+        appUpdateJob?.cancel()
+        appUpdateJob = null
+        offeredUpdate = null
+        _appUpdate.value = null
+        if (code != null) {
+            viewModelScope.launch(Dispatchers.IO) { AppUpdateSkip.write(app.filesDir, code) }
+        }
+    }
+
+    fun dismissAppUpdate() {
+        when (_appUpdate.value) {
+            is AppUpdatePrompt.Offer -> laterAppUpdate()
+            is AppUpdatePrompt.Checking, is AppUpdatePrompt.Downloading -> {
+                appUpdateToken++
+                appUpdateJob?.cancel()
+                appUpdateJob = null
+                _appUpdate.value = null
+            }
+            else -> _appUpdate.value = null
+        }
+    }
+
+    fun openUnknownInstallSettings() {
+        if (_appUpdate.value !is AppUpdatePrompt.Allow) return
+        _appUpdateIntent.value = AppUpdateInstall.settingsIntent(app)
+    }
+
+    /** After the unknown-apps screen, the notes come back so Update now can be tapped again. */
+    fun onAppUpdateResume() {
+        val note = offeredUpdate ?: return
+        if (_appUpdate.value !is AppUpdatePrompt.Allow) return
+        if (AppUpdateInstall.allowed(app)) _appUpdate.value = AppUpdatePrompt.Offer(note)
+    }
+
+    fun consumeAppUpdateIntent() {
+        _appUpdateIntent.value = null
+    }
+
+    fun appUpdateIntentFailed() {
+        _appUpdateIntent.value = null
+        _appUpdate.value = AppUpdatePrompt.Failed
+    }
+
+    private suspend fun lookForAppUpdate(fromSettings: Boolean): AppUpdatePrompt? = withContext(Dispatchers.IO) {
+        appUpdateLock.withLock {
+            if (!PlaceLookup.online(app)) {
+                return@withLock if (fromSettings) AppUpdatePrompt.Unreachable else null
+            }
+            val text = AppUpdateClient.fetchNote(userAgent = updateUserAgent())
+            val note = text?.let(AppUpdate::parse)
+            if (note == null) return@withLock if (fromSettings) AppUpdatePrompt.Unreachable else null
+            val skipped = if (fromSettings) null else AppUpdateSkip.read(app.filesDir)
+            when (val decision = AppUpdate.decide(BuildConfig.VERSION_CODE, note, skipped)) {
+                is AppUpdateDecision.Newer -> AppUpdatePrompt.Offer(decision.note)
+                AppUpdateDecision.Quiet -> if (fromSettings) AppUpdatePrompt.Current(note.versionName) else null
+            }
+        }
+    }
+
+    private fun updateUserAgent(): String = "Fieldwatch/${BuildConfig.VERSION_NAME}"
+
     fun importSignaturesFromUri(uri: Uri) {
         viewModelScope.launch {
-            runCatching {
-                val text = withContext(Dispatchers.IO) {
-                    app.contentResolver.openInputStream(uri)?.use {
-                        it.readBytes().toString(Charsets.UTF_8)
-                    } ?: error("Could not read that file.")
+            try {
+                val summary = withContext(Dispatchers.IO) {
+                    val text = readImportText(uri, ImportFiles.SIGNATURE_MAX)
+                    val pack = SignatureExchange.parse(text)
+                    val result = app.config.importFleets(pack.fleets)
+                    if (result.error != null) error(result.error)
+                    result.summary()
                 }
-                val pack = SignatureExchange.parse(text)
-                val result = app.config.importFleets(pack.fleets)
-                if (result.error != null) error(result.error)
-                app.devices.refresh(
-                    app.config.fleets,
-                    app.config.settings.staleSec,
-                    policy = app.config.settings.detectionPolicy(),
-                    decaySec = app.config.settings.decaySec,
-                )
-                result.summary()
-            }.onSuccess { summary ->
+                refreshDevicesAfterImport()
                 _export.value = ExportUi(
-                    noticeTitle = "Signatures imported",
+                    noticeTitle = LanguageText.text("ui.signatures.imported"),
                     noticeMessage = summary,
                 )
-            }.onFailure { err ->
-                _export.value = ExportUi(
-                    error = err.message ?: "Could not import signatures",
-                    errorTitle = "Could not import signatures",
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: CatalogNeedsNewerApp) {
+                showCatalogNeedsApp()
+            } catch (e: ImportFileException) {
+                showImportProblem("ui.could.not.import.signatures", LanguageText.text(e.key), kept = true)
+            } catch (e: IllegalArgumentException) {
+                showImportProblem(
+                    "ui.could.not.import.signatures",
+                    e.message ?: LanguageText.text("ui.could.not.import.signatures"),
+                    kept = true,
+                )
+            } catch (e: IllegalStateException) {
+                showImportProblem(
+                    "ui.could.not.import.signatures",
+                    e.message ?: LanguageText.text("ui.could.not.import.signatures"),
+                    kept = true,
+                )
+            } catch (_: Exception) {
+                showImportProblem(
+                    "ui.could.not.import.signatures",
+                    LanguageText.text("import.failed.save"),
+                    kept = false,
                 )
             }
         }
@@ -1477,15 +3223,15 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "application/json"
                     clipData = ClipData.newRawUri("settings", uri)
                     putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ settings")
+                    putExtra(Intent.EXTRA_SUBJECT, LanguageText.text("ui.fieldwatch.settings"))
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }.onSuccess { intent ->
-                _export.value = ExportUi(share = intent, shareTitle = "sw33p3r_ settings")
+                _export.value = ExportUi(share = intent, shareTitle = LanguageText.text("ui.fieldwatch.settings"))
             }.onFailure { err ->
                 _export.value = ExportUi(
-                    error = err.message ?: "Could not export settings",
-                    errorTitle = "Could not export settings",
+                    error = err.message ?: LanguageText.text("ui.could.not.export.settings"),
+                    errorTitle = LanguageText.text("ui.could.not.export.settings"),
                 )
             }
         }
@@ -1498,17 +3244,17 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 withContext(Dispatchers.IO) {
                     app.contentResolver.openOutputStream(uri)?.use { out ->
                         out.write(json.toByteArray(Charsets.UTF_8))
-                    } ?: error("Could not write to the location you picked.")
+                    } ?: error(LanguageText.text("ui.could.not.write.location"))
                 }
             }.onSuccess {
                 _export.value = ExportUi(
-                    noticeTitle = "Settings saved",
-                    noticeMessage = "The pack was written to the folder you picked. Keep it for a factory reset or a new phone. Import settings on the new install. Signatures are a separate pack.",
+                    noticeTitle = LanguageText.text("ui.settings.saved"),
+                    noticeMessage = LanguageText.text("ui.pack.was.written.folder.2"),
                 )
             }.onFailure { err ->
                 _export.value = ExportUi(
-                    error = err.message ?: "Could not save settings",
-                    errorTitle = "Could not save settings",
+                    error = err.message ?: LanguageText.text("ui.could.not.save.settings"),
+                    errorTitle = LanguageText.text("ui.could.not.save.settings"),
                 )
             }
         }
@@ -1516,12 +3262,8 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
 
     fun importSettingsFromUri(uri: Uri) {
         viewModelScope.launch {
-            runCatching {
-                val text = withContext(Dispatchers.IO) {
-                    app.contentResolver.openInputStream(uri)?.use {
-                        it.readBytes().toString(Charsets.UTF_8)
-                    } ?: error("Could not read that file.")
-                }
+            try {
+                val text = withContext(Dispatchers.IO) { readImportText(uri, ImportFiles.SETTINGS_MAX) }
                 val pack = SettingsExchange.parse(text)
                 val warning = SettingsExchange.takImportWarning(app.config.settings, pack.settings)
                 if (warning != null) {
@@ -1529,10 +3271,29 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 } else {
                     finishSettingsImport(pack)
                 }
-            }.onFailure { err ->
-                _export.value = ExportUi(
-                    error = err.message ?: "Could not import settings",
-                    errorTitle = "Could not import settings",
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: CatalogNeedsNewerApp) {
+                showCatalogNeedsApp()
+            } catch (e: ImportFileException) {
+                showImportProblem("ui.could.not.import.settings", LanguageText.text(e.key), kept = true)
+            } catch (e: IllegalArgumentException) {
+                showImportProblem(
+                    "ui.could.not.import.settings",
+                    e.message ?: LanguageText.text("ui.could.not.import.settings"),
+                    kept = true,
+                )
+            } catch (e: IllegalStateException) {
+                showImportProblem(
+                    "ui.could.not.import.settings",
+                    e.message ?: LanguageText.text("ui.could.not.import.settings"),
+                    kept = true,
+                )
+            } catch (_: Exception) {
+                showImportProblem(
+                    "ui.could.not.import.settings",
+                    LanguageText.text("import.failed.save"),
+                    kept = false,
                 )
             }
         }
@@ -1542,10 +3303,21 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         val pending = _pendingSettingsImport.value ?: return
         _pendingSettingsImport.value = null
         viewModelScope.launch {
-            runCatching { finishSettingsImport(pending.pack) }.onFailure { err ->
-                _export.value = ExportUi(
-                    error = err.message ?: "Could not import settings",
-                    errorTitle = "Could not import settings",
+            try {
+                finishSettingsImport(pending.pack)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IllegalStateException) {
+                showImportProblem(
+                    "ui.could.not.import.settings",
+                    e.message ?: LanguageText.text("ui.could.not.import.settings"),
+                    kept = true,
+                )
+            } catch (_: Exception) {
+                showImportProblem(
+                    "ui.could.not.import.settings",
+                    LanguageText.text("import.failed.save"),
+                    kept = false,
                 )
             }
         }
@@ -1553,6 +3325,211 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
 
     fun dismissPendingSettingsImport() {
         _pendingSettingsImport.value = null
+    }
+
+    fun chooseLanguage(choice: String) {
+        viewModelScope.launch {
+            val snap = withContext(Dispatchers.IO) {
+                app.language.choose(choice, java.util.Locale.getDefault())
+            }
+            publishLanguage(snap)
+        }
+    }
+
+    fun importLanguageFromUri(uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val bytes = withContext(Dispatchers.IO) {
+                    readImportBytes(uri, LanguagePack.MAX_BYTES)
+                }
+                when (val parsed = LanguagePack.parse(bytes)) {
+                    is LanguageParse.Reject ->
+                        _language.value = _language.value.copy(pending = null, errorKey = parsed.messageKey)
+                    is LanguageParse.Ok ->
+                        _language.value = _language.value.copy(pending = parsed.preview, errorKey = null)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: ImportFileException) {
+                _language.value = _language.value.copy(pending = null, errorKey = e.key)
+            } catch (_: Exception) {
+                _language.value = _language.value.copy(pending = null, errorKey = "ui.could.not.read.file")
+            }
+        }
+    }
+
+    fun confirmLanguageImport() {
+        val pending = _language.value.pending ?: return
+        viewModelScope.launch {
+            try {
+                val snap = withContext(Dispatchers.IO) {
+                    app.language.confirm(pending, java.util.Locale.getDefault())
+                }
+                publishLanguage(snap)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                _language.value = _language.value.copy(pending = null, errorKey = "import.failed.save")
+            }
+        }
+    }
+
+    fun cancelLanguageImport() {
+        _language.value = _language.value.copy(pending = null)
+    }
+
+    fun startLanguageReportShare() {
+        val pending = _language.value.pending ?: return
+        viewModelScope.launch {
+            runCatching {
+                val text = withContext(Dispatchers.Default) {
+                    LanguagePack.report(pending, BuildConfig.VERSION_NAME)
+                }
+                val dir = java.io.File(app.cacheDir, "language").apply { mkdirs() }
+                val file = java.io.File(dir, LanguageReportCopy.FILE)
+                withContext(Dispatchers.IO) { file.writeText(text) }
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+                Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    clipData = ClipData.newRawUri("language-report", uri)
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, LanguageReportCopy.SHARE)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }.onSuccess { intent ->
+                _export.value = ExportUi(share = intent, shareTitle = LanguageReportCopy.SHARE)
+            }.onFailure {
+                _language.value = _language.value.copy(errorKey = "language.report.failed")
+            }
+        }
+    }
+
+    fun dismissLanguageError() {
+        _language.value = _language.value.copy(errorKey = null)
+    }
+
+    fun removeLanguagePack() {
+        viewModelScope.launch {
+            val snap = withContext(Dispatchers.IO) {
+                app.language.remove(java.util.Locale.getDefault())
+            }
+            publishLanguage(snap)
+        }
+    }
+
+    fun dismissLanguageDoor() {
+        viewModelScope.launch {
+            val snap = withContext(Dispatchers.IO) {
+                app.language.dismissDoor(java.util.Locale.getDefault())
+            }
+            publishLanguage(snap, _language.value.pending, _language.value.errorKey)
+        }
+    }
+
+    fun dismissLanguageAi() {
+        val tag = _language.value.snap.activeTag ?: return
+        viewModelScope.launch {
+            val snap = withContext(Dispatchers.IO) {
+                app.language.markAiSeen(tag, java.util.Locale.getDefault())
+            }
+            publishLanguage(snap, _language.value.pending, _language.value.errorKey)
+        }
+    }
+
+    fun startLanguageTemplateShare() {
+        viewModelScope.launch {
+            runCatching {
+                val json = withContext(Dispatchers.Default) {
+                    LanguagePack.template(BuildConfig.VERSION_NAME)
+                }
+                val dir = java.io.File(app.cacheDir, "language").apply { mkdirs() }
+                val file = java.io.File(dir, "fieldwatch-language-en.json")
+                withContext(Dispatchers.IO) { file.writeText(json) }
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
+                Intent(Intent.ACTION_SEND).apply {
+                    type = "application/json"
+                    clipData = ClipData.newRawUri("language", uri)
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    putExtra(Intent.EXTRA_SUBJECT, LanguageExportCopy.SHARE)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+            }.onSuccess { intent ->
+                _export.value = ExportUi(share = intent, shareTitle = LanguageExportCopy.SHARE)
+            }.onFailure { err ->
+                _export.value = ExportUi(
+                    error = err.message ?: LanguageExportCopy.FAILED,
+                    errorTitle = LanguageExportCopy.FAILED,
+                )
+            }
+        }
+    }
+
+    private fun publishLanguage(
+        snap: app.fieldwatch.data.LanguageSnapshot,
+        pending: app.fieldwatch.domain.LanguagePreview? = null,
+        errorKey: String? = null,
+    ) {
+        LanguageText.apply(snap.overlay, snap.activeTag)
+        _language.value = LanguageUiState(snap, pending, errorKey)
+    }
+
+    private fun readImportBytes(uri: Uri, maxBytes: Int): ByteArray {
+        try {
+            val stream = app.contentResolver.openInputStream(uri)
+                ?: throw ImportFileException("ui.could.not.read.file")
+            return stream.use { ImportFiles.read(it, maxBytes) }
+        } catch (e: ImportFileException) {
+            throw e
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            throw ImportFileException("ui.could.not.read.file")
+        }
+    }
+
+    private fun readImportText(uri: Uri, maxBytes: Int): String =
+        readImportBytes(uri, maxBytes).toString(Charsets.UTF_8)
+
+    /** The pack named a class, a rule, or a radio this app does not know. Nothing was saved. */
+    private fun showCatalogNeedsApp() {
+        _export.value = ExportUi(
+            errorTitle = LanguageText.text("catalog.needs.app.title"),
+            error = LanguageText.text("catalog.needs.app.body").trim() +
+                " " + LanguageText.text("import.failed.kept"),
+            updateApp = true,
+        )
+    }
+
+    /** Closes the catalog notice and opens the app-update check. */
+    fun updateAppFromCatalogNotice() {
+        consumeExportNotice()
+        checkForAppUpdate()
+    }
+
+    /** A failed import names the reason. [kept] adds that this phone was not changed. */
+    private fun showImportProblem(titleKey: String, body: String, kept: Boolean) {
+        val text = if (kept) body.trim() + " " + LanguageText.text("import.failed.kept") else body
+        _export.value = ExportUi(
+            errorTitle = LanguageText.text(titleKey),
+            error = text,
+        )
+    }
+
+
+    /** The pack is already saved. A refresh failure must not look like a bad file. */
+    private suspend fun refreshDevicesAfterImport() {
+        try {
+            app.devices.refresh(
+                app.config.fleets,
+                app.config.settings.staleSec,
+                policy = app.config.settings.detectionPolicy(),
+                decaySec = app.config.settings.decaySec,
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // The live list catches up on the next hear.
+        }
     }
 
     private suspend fun finishSettingsImport(pack: SettingsPack) {
@@ -1577,14 +3554,21 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             policy = next.detectionPolicy(),
             decaySec = next.decaySec,
         )
-        if (next.alertVoice || next.gnssVoice) app.alerter.prepareVoice()
+        if (next.alertVoice || next.gnssVoice || next.trustedVoice || next.cellVoice || next.anySensorAlert()) {
+            app.alerter.prepareVoice()
+        }
+        app.announceCell()
+        if (layerAlertsChanged(prev, next)) {
+            app.syncFlock(force = prev.flockLayer != next.flockLayer || prev.sensorLayer != next.sensorLayer)
+        }
         _export.value = ExportUi(
-            noticeTitle = "Settings imported",
+            noticeTitle = LanguageText.text("ui.settings.imported"),
             noticeMessage = result.summary(),
         )
     }
 
     fun setLogExportKind(kind: LogExportKind) {
+        if (kind.sitOnly) return
         _logExportKind.value = kind
     }
 
@@ -1607,46 +3591,112 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         val samples = Geo.despikePath(phone).let { if (it.size >= 2) it else phone } + craft
         if (samples.isEmpty()) return emptyList()
         val settings = app.config.settings
-        return PathTiles.load(
+        val batch = PathTiles.load(
             app, samples,
             onlineLookup = settings.onlineLookup,
+            forPrint = true,
+            basemap = settings.mapBasemap,
+            mapKey = keyFor(settings.mapBasemap),
+            overlays = settings.mapOverlays,
+        )
+        noteMapTiles(settings.mapBasemap, batch.problem)
+        return batch.tiles
+    }
+
+    /** Pinch or drag on Reports → Path. Letting go reloads the whole-path picture. */
+    fun noteSitPathHold(held: Boolean) {
+        val was = sitPathHeld
+        sitPathHeld = held
+        if (was && !held) {
+            pathFlight.pending = null
+            pathFlight.from = null
+            pathFlight.held = false
+            pathFlight.job?.cancel()
+            pathFlight.job = null
+            pathFlight.key = null
+            refreshSitPath()
+        }
+    }
+
+    /** Tiles for the part of Reports → Path the finger is looking at. */
+    fun refreshSitPathWindow(
+        south: Double,
+        north: Double,
+        west: Double,
+        east: Double,
+    ) {
+        if (!sitPathHeld) return
+        val settings = app.config.settings
+        refreshArea(
+            pathFlight, _pathTiles, _pathZoomIn, live = false,
+            south, north, west, east,
+            settings.onlineLookup, settings.mapBasemap, settings.mapOverlays,
+            held = false,
+            prefetch = false,
         )
     }
 
     fun refreshSitPath() {
         viewModelScope.launch(Dispatchers.Default) {
-            val model = buildSitPath()
-            _sitPath.value = model
-            val settings = app.config.settings
-            if (!settings.onlineLookup) {
-                _pathTiles.value = emptyList()
-                _pathAircraftTiles.value = emptyList()
+            val model = try {
+                buildSitPath()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
                 return@launch
             }
-            val phone = Geo.despikePath(model.samples).let { if (it.size >= 2) it else model.samples }
-            val walk = phone + model.craft.flatMap { it.samples }
-            _pathTiles.value = if (walk.isNotEmpty()) {
-                runCatching {
-                    PathTiles.load(
-                        app, walk,
-                        onlineLookup = settings.onlineLookup,
-                    )
-                }.getOrDefault(emptyList())
-            } else {
-                emptyList()
-            }
-            _pathAircraftTiles.value = model.aircraftCards.map { card ->
-                val samples = card.craft.flatMap { it.samples }
-                if (samples.size < 2) {
-                    emptyList()
-                } else {
-                    runCatching {
-                        PathTiles.load(
-                            app, samples,
-                            onlineLookup = settings.onlineLookup,
-                        )
-                    }.getOrDefault(emptyList())
+            _sitPath.value = model
+            try {
+                val settings = app.config.settings
+                if (!settings.onlineLookup) {
+                    _pathTiles.value = emptyList()
+                    _pathAircraftTiles.value = emptyList()
+                    _pathZoomIn.value = false
+                    return@launch
                 }
+                val phone = Geo.despikePath(model.samples).let { if (it.size >= 2) it else model.samples }
+                val walk = phone + model.craft.flatMap { it.samples }
+                if (walk.isEmpty()) {
+                    if (!sitPathHeld) {
+                        _pathTiles.value = emptyList()
+                        _pathZoomIn.value = false
+                    }
+                } else if (!sitPathHeld) {
+                    val batch = runCatching {
+                        PathTiles.load(
+                            app, walk,
+                            onlineLookup = settings.onlineLookup,
+                            basemap = settings.mapBasemap,
+                            mapKey = keyFor(settings.mapBasemap),
+                            overlays = settings.mapOverlays,
+                        )
+                    }.getOrDefault(PathTiles.Batch(problem = if (settings.mapBasemap.needsKey) MapKeyProblem.FAILED else MapKeyProblem.NONE))
+                    noteMapTiles(settings.mapBasemap, batch.problem)
+                    _pathZoomIn.value = batch.zoomIn
+                    _pathTiles.value = if (batch.zoomIn) emptyList() else batch.tiles
+                }
+                _pathAircraftTiles.value = model.aircraftCards.map { card ->
+                    val samples = card.craft.flatMap { it.samples }
+                    if (samples.isEmpty()) {
+                        emptyList()
+                    } else {
+                        val batch = runCatching {
+                            PathTiles.load(
+                                app, samples,
+                                onlineLookup = settings.onlineLookup,
+                                basemap = settings.mapBasemap,
+                                mapKey = keyFor(settings.mapBasemap),
+                                overlays = settings.mapOverlays,
+                            )
+                        }.getOrDefault(PathTiles.Batch(problem = if (settings.mapBasemap.needsKey) MapKeyProblem.FAILED else MapKeyProblem.NONE))
+                        noteMapTiles(settings.mapBasemap, batch.problem)
+                        batch.tiles
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // The path is already on screen. Map pictures can wait.
             }
         }
     }
@@ -1672,11 +3722,12 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 mineKeys = RadioBookmarks.mineKeys(app.config.watchlist),
             )
             val empty = when {
-                !tagging -> "Turn on Tag detections with GPS to record a path."
-                samples.isEmpty() -> "Walk with that on. The path needs a GPS fix."
+                !tagging -> LanguageText.text("ui.turn.tag.detections.gps.2")
+                samples.isEmpty() -> LanguageText.text("ui.walk.path.needs.gps")
                 else -> null
             }
             pathRadios = source.devices
+            val tally = pathCameraTally(source.pathCameras, raw)
             val pictures = AircraftTrail.pictures(
                 source.devices.mapNotNull { device ->
                     AircraftTrail.source(
@@ -1691,11 +3742,13 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     samples = samples,
                     dots = if (samples.isNotEmpty()) plot.points else emptyList(),
                     lengthM = Geo.pathLengthM(samples),
-                    spanM = Geo.spanM(samples),
+                    spanM = Geo.reachM(samples),
                     title = source.name,
                     emptyHint = empty,
                     live = app.sits.ui.value.open != null,
                     gnss = if (samples.isNotEmpty()) SitPathPlot.gnssPins(source.gnss, samples) else emptyList(),
+                    pathCameras = tally.cameras,
+                    pathCameraTally = tally,
                 ),
                 pictures,
             )
@@ -1704,8 +3757,8 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         val samples = Geo.despikePath(app.operatorPathCopy().filter { it.at >= start })
         val devices = app.devices.devices.value.filter { it.lastSeen >= start || it.firstSeen >= start }
         val empty = when {
-            !tagging -> "Turn on Tag detections with GPS to record a path."
-            samples.isEmpty() -> "Last 15 minutes. Walk with Tag detections with GPS on, or start a sit to keep a longer path."
+            !tagging -> LanguageText.text("ui.turn.tag.detections.gps.2")
+            samples.isEmpty() -> LanguageText.text("ui.last.15.minutes.walk")
             else -> null
         }
         pathRadios = devices
@@ -1722,17 +3775,20 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             SitPathPlot.PlotRadios(emptyList())
         }
         val windowPath = app.operatorPathCopy().filter { it.at >= start }
+        val tally = pathCameraTally(null, windowPath)
         val gnssMarks = app.gnss.marks().filter { it.at >= start || (it.endedAt > 0L && it.endedAt >= start) }
         return AircraftTrail.overlay(
             SitPathPlot.Model(
                 samples = samples,
                 dots = plot.points,
                 lengthM = Geo.pathLengthM(samples),
-                spanM = Geo.spanM(samples),
-                title = "Last 15 minutes",
+                spanM = Geo.reachM(samples),
+                title = LanguageText.text("ui.last.15.minutes"),
                 emptyHint = empty,
                 live = true,
                 gnss = if (samples.isNotEmpty()) SitPathPlot.gnssPins(gnssMarks, samples) else emptyList(),
+                pathCameras = tally.cameras,
+                pathCameraTally = tally,
             ),
             AircraftTrail.pictures(
                 devices.mapNotNull { device ->
@@ -1752,6 +3808,24 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         return true
     }
 
+    /** Opens a places-report radio. A radio that has left the live list still opens. */
+    fun openPlaceRadio(deviceKey: String): Boolean {
+        val live = app.devices.devices.value.firstOrNull { it.key == deviceKey }
+        if (live != null) {
+            select(live)
+            return true
+        }
+        val held = app.sits.sighting(deviceKey)
+        if (held != null) {
+            select(if (held.gone) held else held.copy(gone = true))
+            return true
+        }
+        val record = app.places.snapshot().firstOrNull { it.deviceKey == deviceKey } ?: return false
+        val remembered = PlaceReport.remembered(record) ?: return false
+        select(remembered)
+        return true
+    }
+
     fun suggestedExportName(): String {
         val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
             .format(java.util.Date())
@@ -1760,6 +3834,8 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             LogExportKind.LOG_JSONL -> app.logs.suggestedExportName(asJsonl = true)
             LogExportKind.GPX, LogExportKind.KML, LogExportKind.WIGLE ->
                 GeoExport.suggestedName(GeoExport.formatOf(kind)!!, stamp)
+            LogExportKind.GEOJSON, LogExportKind.ATAK ->
+                error(LanguageText.text("ui.format.sit.export"))
         }
     }
 
@@ -1768,28 +3844,27 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         LogExportKind.LOG_JSONL -> app.logs.exportMime(asJsonl = true)
         LogExportKind.GPX, LogExportKind.KML, LogExportKind.WIGLE ->
             GeoExport.formatOf(_logExportKind.value)!!.mime
+        LogExportKind.GEOJSON, LogExportKind.ATAK ->
+            error(LanguageText.text("ui.format.sit.export"))
     }
 
     fun startFieldDebriefPdf() {
         if (_export.value.active) return
         viewModelScope.launch {
-            publishExport(0.05f, "Writing debrief PDF…")
+            val writing = LanguageText.text("ui.writing.debrief.pdf")
+            val laying = LanguageText.text("ui.laying.out.debrief.pdf")
             runCatching {
-                val doc = fieldDebriefDoc()
-                publishExport(0.4f, "Laying out debrief PDF…")
+                val doc = fieldDebriefDoc(0.28f)
+                publishExport(0.30f, LanguageText.text("ui.loading.map.tiles"))
                 val dir = File(app.cacheDir, "debrief").apply { mkdirs() }
                 val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
                     .format(java.util.Date())
                 val file = File(dir, "fieldwatch-debrief-$stamp.pdf")
-                publishExport(0.32f, "Loading map tiles…")
                 val tiles = pathTilesForFigure(doc.pathFigure)
                 val extraTiles = doc.extraFigures.map { pathTilesForFigure(it) }
+                publishExport(0.38f, laying)
                 withContext(Dispatchers.Default) {
-                    DebriefPdf.write(doc, file, tiles, extraTiles) { p ->
-                        kotlinx.coroutines.runBlocking {
-                            publishExport(0.4f + 0.55f * p, "Writing debrief PDF…")
-                        }
-                    }
+                    DebriefPdf.write(doc, file, tiles, extraTiles, reportPdf(0.38f, 0.60f, laying, writing))
                 }
                 val uri: Uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
                 Intent(Intent.ACTION_SEND).apply {
@@ -1804,10 +3879,10 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     active = false,
                     progress = 1f,
                     share = intent,
-                    shareTitle = "Debrief PDF",
+                    shareTitle = LanguageText.text("ui.debrief.pdf"),
                 )
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not write debrief PDF")
+                _export.value = ExportUi(error = exportError(err, "ui.could.not.write.debrief"))
             }
         }
     }
@@ -1815,14 +3890,29 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startFieldDebrief() {
         if (_export.value.active) return
         viewModelScope.launch {
-            publishExport(0.08f, "Writing debrief…")
+            val writing = LanguageText.text("ui.writing.debrief")
             runCatching {
-                val doc = fieldDebriefDoc()
-                publishExport(0.9f, "Writing debrief…")
+                val doc = fieldDebriefDoc(0.46f)
+                val dir = File(app.cacheDir, "debrief")
+                val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
+                    .format(java.util.Date())
+                val file = File(dir, "fieldwatch-debrief-$stamp.txt")
+                withContext(Dispatchers.IO) {
+                    dir.mkdirs()
+                    doc.writePlainText(file) { frac ->
+                        if (!isActive) throw CancellationException()
+                        kotlinx.coroutines.runBlocking {
+                            publishExport(0.48f + 0.50f * frac, writing)
+                        }
+                    }
+                }
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
+                    clipData = ClipData.newRawUri("debrief", uri)
+                    putExtra(Intent.EXTRA_STREAM, uri)
                     putExtra(Intent.EXTRA_SUBJECT, debriefSubject(doc))
-                    putExtra(Intent.EXTRA_TEXT, doc.toPlainText())
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }.onSuccess { intent ->
                 _export.value = ExportUi(
@@ -1832,16 +3922,42 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     shareTitle = "Debrief",
                 )
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not write debrief")
+                _export.value = ExportUi(error = exportError(err, "ui.could.not.write.debrief.2"))
             }
         }
     }
 
-    private fun debriefSubject(doc: DebriefDoc): String =
-        if (doc.heading.startsWith("sw33p3r_ SIT")) doc.heading else "sw33p3r_ field debrief — last 15 minutes"
+    /**
+     * Cameras for the path screen. A sit that already saved the on-path list
+     * does not search the files again. An older sit still counts once.
+     */
+    private fun pathCameraTally(saved: List<FlockCamera>?, path: List<GpsSample>): PathCameras.Tally {
+        if (saved != null) {
+            val (plates, others) = app.cameraListsOnDisk()
+            return PathCameras.fromSaved(saved, plates, others, path.isNotEmpty())
+        }
+        val report = app.cameraReport()
+            ?: return PathCameras.fromSaved(emptyList(), plates = false, others = false, path.isNotEmpty())
+        return PathCameras.tally(path, report.plates, report.others, report.near)
+    }
 
-    private suspend fun fieldDebriefDoc(): DebriefDoc {
-        publishExport(0.08f, "Gathering sit…")
+    /** File flags for a sit that already saved its cameras, or the searchable lists. */
+    private fun debriefCameras(saved: List<FlockCamera>?): PathCameras.Report {
+        if (saved != null) {
+            val (plates, others) = app.cameraListsOnDisk()
+            return PathCameras.Report(plates, others) { _, _, _ -> emptyList() }
+        }
+        return app.cameraReport()
+            ?: PathCameras.Report(plates = false, others = false) { _, _, _ -> emptyList() }
+    }
+
+    private fun debriefSubject(doc: DebriefDoc): String =
+        if (doc.heading.startsWith("FIELDWATCH SIT")) doc.heading else LanguageText.text("ui.fieldwatch.field.debrief.last")
+
+    /** [roof] leaves room for the text file or the PDF that follows this build. */
+    private suspend fun fieldDebriefDoc(roof: Float): DebriefDoc {
+        val building = LanguageText.text("ui.building.debrief")
+        publishExport(0.04f.coerceAtMost(roof), LanguageText.text("ui.gathering.sit"))
         val settings = app.config.settings
         val fleets = app.config.fleets
         val now = System.currentTimeMillis()
@@ -1852,16 +3968,31 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         val places = if (settings.demoMode) {
             DebriefPlaces.Off
         } else if (settings.onlineLookup) {
-            publishExport(0.14f, "Looking up place names…")
-            val found = PlaceLookup.lookup(app, path, devices, now, onProgress = { msg ->
-                kotlinx.coroutines.runBlocking { publishExport(0.18f, msg) }
-            })
+            val lookupAt = 0.10f.coerceAtMost(roof)
+            publishExport(lookupAt, LanguageText.text("ui.looking.up.place.names"))
+            val found = PlaceLookup.lookup(
+                app, path, devices, now,
+                extra = placeLookupFixes(
+                    if (settings.placeWatch) app.places.snapshot() else emptyList(),
+                    window?.endAt ?: now,
+                ),
+                onProgress = { msg ->
+                    kotlinx.coroutines.runBlocking { publishExport(lookupAt, msg) }
+                },
+            )
             found
         } else {
             DebriefPlaces.Off
         }
-        publishExport(0.32f, "Building debrief…")
-        return withContext(Dispatchers.Default) {
+        val buildAt = (roof * 0.45f).coerceAtLeast(0.12f).coerceAtMost(roof)
+        publishExport(buildAt, building)
+        val savedCameras = source?.pathCameras
+        val cameras = withContext(Dispatchers.IO) { debriefCameras(savedCameras) }
+        val trustedLines = app.trusted.linesIn(
+            window?.startAt ?: (now - 15 * 60_000L),
+            window?.endAt ?: now,
+        )
+        val doc = withContext(Dispatchers.Default) {
             DebriefReport.document(
                 devices = devices,
                 fleets = fleets,
@@ -1877,18 +4008,26 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 mineKeys = RadioBookmarks.mineKeys(app.config.watchlist),
                 floods = source?.floods ?: app.floodBursts(),
                 gnss = source?.gnss ?: app.gnss.marks(),
+                placeRecords = if (settings.placeWatch) app.places.snapshot() else emptyList(),
+                cameras = cameras,
+                trusted = trustedLines,
+                cells = source?.cells ?: app.cells.marks(),
+                savedCameras = savedCameras,
             ).withDemoMacs(
-                devices.map { it.mac },
+                devices.map { it.mac } + trustedLines.map { it.bssid },
                 settings.demoMode,
                 devices.mapNotNull { it.payloadUasId },
             )
         }
+        publishExport(roof, building)
+        return doc
     }
 
     fun startAiExport() {
         if (_export.value.active) return
         viewModelScope.launch {
-            publishExport(0.06f, "Building AI export prompt…")
+            val building = LanguageText.text("ui.building.ai.export.prompt")
+            publishExport(0.04f, building)
             runCatching {
                 val settings = app.config.settings
                 val fleets = app.config.fleets
@@ -1900,16 +4039,28 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 val places = if (settings.demoMode) {
                     DebriefPlaces.Off
                 } else if (settings.onlineLookup) {
-                    publishExport(0.12f, "Looking up place names…")
-                    val found = PlaceLookup.lookup(app, path, devices, now) { msg ->
-                        kotlinx.coroutines.runBlocking { publishExport(0.16f, msg) }
+                    publishExport(0.10f, LanguageText.text("ui.looking.up.place.names"))
+                    val found = PlaceLookup.lookup(
+                        app, path, devices, now,
+                        extra = placeLookupFixes(
+                            if (settings.placeWatch) app.places.snapshot() else emptyList(),
+                            window?.endAt ?: now,
+                        ),
+                    ) { msg ->
+                        kotlinx.coroutines.runBlocking { publishExport(0.10f, msg) }
                     }
-                    publishExport(0.35f, "Building AI export prompt…")
+                    publishExport(0.22f, building)
                     found
                 } else {
                     DebriefPlaces.Off
                 }
-                publishExport(0.4f, "Building AI export prompt…")
+                publishExport(0.30f, building)
+                val savedCameras = source?.pathCameras
+                val cameras = withContext(Dispatchers.IO) { debriefCameras(savedCameras) }
+                val trustedLines = app.trusted.linesIn(
+                    window?.startAt ?: (now - 15 * 60_000L),
+                    window?.endAt ?: now,
+                )
                 val text = withContext(Dispatchers.Default) {
                     val raw = DebriefPrompt.build(
                         devices = devices,
@@ -1925,10 +4076,15 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                         mineKeys = RadioBookmarks.mineKeys(app.config.watchlist),
                         floods = source?.floods ?: app.floodBursts(),
                         gnss = source?.gnss ?: app.gnss.marks(),
+                        placeRecords = if (settings.placeWatch) app.places.snapshot() else emptyList(),
+                        cameras = cameras,
+                        trusted = trustedLines,
+                        cells = source?.cells ?: app.cells.marks(),
+                        savedCameras = savedCameras,
                     )
                     val masked = MacUtil.redactPrivateText(
                         raw,
-                        devices.map { it.mac },
+                        devices.map { it.mac } + trustedLines.map { it.bssid },
                         devices.mapNotNull { it.payloadUasId },
                         settings.demoMode,
                     )
@@ -1943,7 +4099,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     putExtra(
                         Intent.EXTRA_SUBJECT,
                         if (window != null) "sw33p3r_ AI export — sit ${window.sitName}"
-                        else "sw33p3r_ AI export — last 15 minutes",
+                        else LanguageText.text("ui.fieldwatch.ai.export.last"),
                     )
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
@@ -1955,7 +4111,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     shareTitle = "AI Export",
                 )
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not build AI export")
+                _export.value = ExportUi(error = err.message ?: LanguageText.text("ui.could.not.build.ai"))
             }
         }
     }
@@ -1963,7 +4119,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startDeviceDetailAiExport(device: Sighting) {
         if (_export.value.active) return
         viewModelScope.launch {
-            publishExport(0.08f, "Building AI export prompt…")
+            publishExport(0.08f, LanguageText.text("ui.building.ai.export.prompt"))
             runCatching {
                 val settings = app.config.settings
                 val names = device.fleetIds.map { fleetName(it) }
@@ -1971,32 +4127,47 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 val notes = signatureNotesFor(device)
                 val places = if (settings.demoMode) {
                     DebriefPlaces.Off
-                } else if (settings.onlineLookup && (settings.tagLocation || device.latitude != null)) {
-                    publishExport(0.15f, "Looking up place names…")
-                    val found = PlaceLookup.lookup(app, app.operatorPathCopy(), listOf(device), System.currentTimeMillis()) { msg ->
+                } else if (settings.onlineLookup && (settings.tagLocation || device.latitude != null || settings.placeWatch)) {
+                    publishExport(0.15f, LanguageText.text("ui.looking.up.place.names"))
+                    val found = PlaceLookup.lookup(
+                        app,
+                        app.operatorPathCopy(),
+                        listOf(device),
+                        System.currentTimeMillis(),
+                        extra = placeLookupFixes(
+                            if (settings.placeWatch) app.places.snapshot() else emptyList(),
+                            System.currentTimeMillis(),
+                        ),
+                    ) { msg ->
                         kotlinx.coroutines.runBlocking { publishExport(0.2f, msg) }
                     }
-                    publishExport(0.4f, "Building AI export prompt…")
+                    if (found.namesByCell.isNotEmpty()) _placeStreets.update { it + found.namesByCell }
+                    publishExport(0.4f, LanguageText.text("ui.building.ai.export.prompt"))
                     found
                 } else {
                     DebriefPlaces.Off
                 }
-                publishExport(0.45f, "Building AI export prompt…")
+                publishExport(0.45f, LanguageText.text("ui.building.ai.export.prompt"))
                 val text = withContext(Dispatchers.Default) {
+                    val phone = app.currentFix()
                     val raw = DeviceDetailPrompt.build(
                         device, names, settings, places, attentionNotes = attention,
                         signatureNotes = notes,
                         fleets = app.config.fleets,
                         mine = isMine(device.key),
+                        placeLines = placeLines(device, places.namesByCell),
+                        demo = settings.demoMode,
+                        phoneLat = phone?.first,
+                        phoneLon = phone?.second,
                     )
                     val masked = MacUtil.redactPrivateText(
                         raw,
-                        listOf(device.mac),
+                        listOfNotNull(device.mac, device.facts.interworking?.hessid),
                         listOfNotNull(device.payloadUasId),
                         settings.demoMode,
                     )
                     if (settings.demoMode) {
-                        "Privacy mode: MAC tails are **:**:**. UAS ids and GPS coordinates are masked. Logs on the phone are unchanged.\n\n$masked"
+                        "Privacy mode: MAC tails are **:**:**. UAS ids, GPS coordinates, and raw advertisement bytes are masked. Logs on the phone are unchanged.\n\n$masked"
                     } else {
                         masked
                     }
@@ -2020,9 +4191,21 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     shareTitle = "AI Export",
                 )
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not build AI export")
+                _export.value = ExportUi(error = err.message ?: LanguageText.text("ui.could.not.build.ai"))
             }
         }
+    }
+
+    /** Local check only. Reads radios already in memory and the network flag. */
+    fun catalogRequestVisible(device: Sighting): Boolean {
+        if (!CatalogRequest.eligible(device, app.devices.devices.value)) return false
+        return PlaceLookup.online(getApplication())
+    }
+
+    fun openCatalogRequest(device: Sighting) {
+        val url = CatalogRequest.issueUrl(device, app.devices.devices.value) ?: return
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { getApplication<Application>().startActivity(intent) }
     }
 
     fun startDeviceDetailShare(device: Sighting) {
@@ -2033,20 +4216,26 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 val names = device.fleetIds.map { fleetName(it) }
                 val attention = attentionNotesFor(device)
                 val notes = signatureNotesFor(device)
+                val streets = streetsForDevice(device)
                 val text = withContext(Dispatchers.Default) {
+                    val phone = app.currentFix()
                     val raw = DeviceDetailText.build(
                         device, names, attentionNotes = attention, signatureNotes = notes,
                         fleets = app.config.fleets,
                         mine = isMine(device.key),
+                        placeLines = placeLines(device, streets),
+                        demo = settings.demoMode,
+                        phoneLat = phone?.first,
+                        phoneLon = phone?.second,
                     )
                     val masked = MacUtil.redactPrivateText(
                         raw,
-                        listOf(device.mac),
+                        listOfNotNull(device.mac, device.facts.interworking?.hessid),
                         listOfNotNull(device.payloadUasId),
                         settings.demoMode,
                     )
                     if (settings.demoMode) {
-                        "Privacy mode: MAC tails are **:**:**. UAS ids and GPS coordinates are masked. Logs on the phone are unchanged.\n\n$masked"
+                        "Privacy mode: MAC tails are **:**:**. UAS ids, GPS coordinates, and raw advertisement bytes are masked. Logs on the phone are unchanged.\n\n$masked"
                     } else {
                         masked
                     }
@@ -2063,9 +4252,9 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
             }.onSuccess { intent ->
-                _export.value = ExportUi(share = intent, shareTitle = "Device detail")
+                _export.value = ExportUi(share = intent, shareTitle = LanguageText.text("ui.device.detail"))
             }.onFailure { err ->
-                _export.value = ExportUi(error = err.message ?: "Could not share device detail")
+                _export.value = ExportUi(error = err.message ?: LanguageText.text("ui.could.not.share.device"))
             }
         }
     }
@@ -2081,7 +4270,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startSitExport() {
         if (_export.value.active) return
         viewModelScope.launch {
-            runExport("Preparing sit export…") {
+            runExport(LanguageText.text("ui.preparing.sit.export")) {
                 val kind = _sitExportKind.value
                 val (file, sitName) = writeSitExport(kind)
                 val uri: Uri = FileProvider.getUriForFile(app, "${app.packageName}.files", file)
@@ -2093,7 +4282,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }.onSuccess { intent ->
-                _export.value = ExportUi(active = false, progress = 1f, share = intent, shareTitle = "Sit export")
+                _export.value = ExportUi(active = false, progress = 1f, share = intent, shareTitle = LanguageText.text("reports.sit.export"))
             }
         }
     }
@@ -2101,12 +4290,12 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startSitSaveToUri(uri: Uri) {
         if (_export.value.active) return
         viewModelScope.launch {
-            runExport("Saving sit export…") {
+            runExport(LanguageText.text("ui.saving.sit.export")) {
                 val kind = _sitExportKind.value
-                val text = sitExportText(kind)
+                val bytes = sitExportBytes(kind)
                 withContext(Dispatchers.IO) {
-                    app.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
-                        ?: error("Could not open the selected location")
+                    app.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        ?: error(LanguageText.text("ui.could.not.open.location"))
                 }
             }.onSuccess {
                 _export.value = ExportUi(active = false, progress = 1f, saved = true)
@@ -2118,30 +4307,33 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         val name: String,
         val devices: List<Sighting>,
         val path: List<GpsSample>,
+        val gnss: List<GnssMark>,
     )
 
     private fun sitExportWindow(now: Long = System.currentTimeMillis()): SitExportWindow {
         val source = app.sits.debriefSource(now)
         if (source != null) {
-            return SitExportWindow(source.name, source.devices, source.operatorPath)
+            return SitExportWindow(source.name, source.devices, source.operatorPath, source.gnss)
         }
         val start = now - DebriefPrompt.WINDOW_MS
+        val marks = app.gnss.marks().filter { it.at >= start || (it.endedAt > 0L && it.endedAt >= start) }
         return SitExportWindow(
-            "Last 15 minutes",
+            LanguageText.text("ui.last.15.minutes"),
             app.devices.devices.value.filter { it.lastSeen >= start || it.firstSeen >= start },
             app.operatorPathCopy().filter { it.at >= start },
+            marks,
         )
     }
 
     private suspend fun writeSitExport(kind: LogExportKind): Pair<File, String> {
-        val text = sitExportText(kind)
+        val bytes = sitExportBytes(kind)
         val win = sitExportWindow()
         val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
             .format(java.util.Date())
         val dir = File(app.cacheDir, "export").apply { mkdirs() }
         val file = File(dir, SitExport.suggestedName(kind, win.name, stamp))
         withContext(Dispatchers.IO) {
-            file.writeText(text)
+            file.writeBytes(bytes)
             app.getExternalFilesDir(null)?.let { ext ->
                 runCatching { file.copyTo(File(ext, file.name), overwrite = true) }
             }
@@ -2149,8 +4341,33 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         return file to win.name
     }
 
+    private suspend fun sitExportBytes(kind: LogExportKind): ByteArray {
+        if (kind != LogExportKind.ATAK) return sitExportText(kind).toByteArray(Charsets.UTF_8)
+        publishExport(0.08f, LanguageText.text("ui.gathering.sit"))
+        val win = sitExportWindow()
+        val radios = _sitExportRadios.value
+        val now = System.currentTimeMillis()
+        publishExport(0.4f, LanguageText.text("ui.writing.what", mapOf("what" to kind.label())))
+        val packed = withContext(Dispatchers.Default) {
+            SitTakPackage.pack(
+                win.devices,
+                radios,
+                win.path,
+                win.gnss,
+                app.config.fleets,
+                app.config.watchlist,
+                now,
+                tag = app.config.takInstallTag,
+                callsign = app.config.settings.takCallsign,
+            )
+        } ?: error(SitExport.emptyHint(kind, radios))
+        return withContext(Dispatchers.Default) {
+            SitTakPackage.zip(packed, java.util.UUID.randomUUID().toString(), win.name, now)
+        }
+    }
+
     private suspend fun sitExportText(kind: LogExportKind): String {
-        publishExport(0.08f, "Gathering sit…")
+        publishExport(0.08f, LanguageText.text("ui.gathering.sit"))
         val win = sitExportWindow()
         val radios = _sitExportRadios.value
         val custom = RadioBookmarks.labels(app.config.watchlist)
@@ -2161,7 +4378,13 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         val rows = SitExport.rows(win.devices, radios)
         if (kind == LogExportKind.LOG_CSV || kind == LogExportKind.LOG_JSONL) {
             if (rows.isEmpty()) error(SitExport.emptyHint(kind, radios))
-            publishExport(0.4f, "Writing ${kind.label} · ${rows.size} radios")
+            publishExport(
+                0.4f,
+                LanguageText.text(
+                    "ui.writing.radios",
+                    mapOf("what" to kind.label(), "n" to rows.size.toString()),
+                ),
+            )
             return withContext(Dispatchers.Default) {
                 if (kind == LogExportKind.LOG_CSV) {
                     SitExport.csv(win.devices, radios, custom, notes, extra, fleets, mine)
@@ -2172,13 +4395,19 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         }
         val pins = SitExport.mapRadios(win.devices, radios)
         if (pins.isEmpty()) error(SitExport.emptyHint(kind, radios))
-        val fmt = GeoExport.formatOf(kind) ?: error("Pick a map format.")
+        val fmt = GeoExport.formatOf(kind) ?: error(LanguageText.text("ui.pick.map.format"))
         val info = listOf(
             "model=${android.os.Build.MODEL}",
             "release=${android.os.Build.VERSION.RELEASE}",
             "device=${android.os.Build.DEVICE}",
         ).joinToString(",")
-        publishExport(0.45f, "Writing ${kind.label} · ${pins.size} pins")
+        publishExport(
+            0.45f,
+            LanguageText.text(
+                "ui.writing.pins",
+                mapOf("what" to kind.label(), "n" to pins.size.toString()),
+            ),
+        )
         return withContext(Dispatchers.Default) {
             GeoExport.render(
                 fmt, pins, emptyMap(), BuildConfig.VERSION_NAME, info,
@@ -2190,7 +4419,17 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     if (done == total || done % 250 == 0) {
                         val pct = 0.50f + 0.45f * done.toFloat() / total.toFloat()
                         kotlinx.coroutines.runBlocking {
-                            publishExport(pct, "Writing ${kind.label} · $done of $total")
+                            publishExport(
+                            pct,
+                            LanguageText.text(
+                                "ui.writing.progress",
+                                mapOf(
+                                    "what" to kind.label(),
+                                    "done" to done.toString(),
+                                    "total" to total.toString(),
+                                ),
+                            ),
+                        )
                         }
                     }
                 },
@@ -2201,7 +4440,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startExport() {
         if (_export.value.active) return
         viewModelScope.launch {
-            runExport("Logging paused · preparing file…") {
+            runExport(LanguageText.text("ui.logging.paused.preparing.file")) {
                 val kind = _logExportKind.value
                 val radios = _logExportRadios.value
                 val file = when (kind) {
@@ -2210,6 +4449,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     LogExportKind.LOG_JSONL ->
                         app.logs.exportBundle(asJsonl = true, radios = radios, onProgress = ::reportCopy)
                     LogExportKind.GPX, LogExportKind.KML, LogExportKind.WIGLE -> writeMapExport(kind, radios)
+                    LogExportKind.GEOJSON, LogExportKind.ATAK -> error(LanguageText.text("ui.format.sit.export"))
                 }
                 app.getExternalFilesDir(null)?.let { ext ->
                     runCatching { file.copyTo(File(ext, file.name), overwrite = true) }
@@ -2231,7 +4471,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun startSaveToUri(uri: Uri) {
         if (_export.value.active) return
         viewModelScope.launch {
-            runExport("Logging paused · saving to the location you picked…") {
+            runExport(LanguageText.text("ui.logging.paused.saving.location")) {
                 val kind = _logExportKind.value
                 val radios = _logExportRadios.value
                 when (kind) {
@@ -2247,9 +4487,10 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                         val text = mapExportText(kind, radios)
                         withContext(Dispatchers.IO) {
                             app.contentResolver.openOutputStream(uri)?.use { it.write(text.toByteArray()) }
-                                ?: error("Could not open the selected location")
+                                ?: error(LanguageText.text("ui.could.not.open.location"))
                         }
                     }
+                    LogExportKind.GEOJSON, LogExportKind.ATAK -> error(LanguageText.text("ui.format.sit.export"))
                 }
             }.onSuccess {
                 _export.value = ExportUi(active = false, progress = 1f, saved = true)
@@ -2258,16 +4499,17 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun exportSubject(kind: LogExportKind): String = when (kind) {
-        LogExportKind.LOG_CSV -> "sw33p3r_ log (CSV)"
-        LogExportKind.LOG_JSONL -> "sw33p3r_ log (JSON lines)"
-        LogExportKind.GPX -> "sw33p3r_ GPX"
-        LogExportKind.KML -> "sw33p3r_ KML"
-        LogExportKind.WIGLE -> "sw33p3r_ WiGLE CSV"
+        LogExportKind.LOG_CSV -> LanguageText.text("ui.fieldwatch.log.csv")
+        LogExportKind.LOG_JSONL -> LanguageText.text("ui.fieldwatch.log.json.lines")
+        LogExportKind.GPX -> LanguageText.text("ui.fieldwatch.gpx")
+        LogExportKind.KML -> LanguageText.text("ui.fieldwatch.kml")
+        LogExportKind.WIGLE -> LanguageText.text("ui.fieldwatch.wigle.csv")
+        LogExportKind.GEOJSON, LogExportKind.ATAK -> error(LanguageText.text("ui.format.sit.export"))
     }
 
     private suspend fun writeMapExport(kind: LogExportKind, radios: LogExportRadios): File {
         val text = mapExportText(kind, radios)
-        val fmt = GeoExport.formatOf(kind) ?: error("Pick a map format.")
+        val fmt = GeoExport.formatOf(kind) ?: error(LanguageText.text("ui.pick.map.format"))
         val dir = File(app.cacheDir, "export").apply { mkdirs() }
         val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US)
             .format(java.util.Date())
@@ -2282,19 +4524,28 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private suspend fun mapExportText(kind: LogExportKind, radios: LogExportRadios): String {
-        val fmt = GeoExport.formatOf(kind) ?: error("Pick a map format.")
-        publishExport(0.02f, "Reading log…")
+        val fmt = GeoExport.formatOf(kind) ?: error(LanguageText.text("ui.pick.map.format"))
+        publishExport(0.02f, LanguageText.text("ui.reading.log.2"))
         val pins = app.logs.readRadios { copied, total ->
             val pct = 0.05f + 0.40f * copied.toFloat() / total.toFloat().coerceAtLeast(1f)
-            publishExport(pct, "Reading log · ${copied / 1024} KB of ${total / 1024} KB")
+            publishExport(
+                pct,
+                LanguageText.text(
+                    "ui.reading.kb",
+                    mapOf(
+                        "done" to (copied / 1024).toString(),
+                        "total" to (total / 1024).toString(),
+                    ),
+                ),
+            )
         }.filter { it.hasPosition && radios.matches(it.kind) }
         if (pins.isEmpty()) {
             val which = when (radios) {
-                LogExportRadios.BOTH -> "radios"
-                LogExportRadios.WIFI -> "Wi-Fi radios"
-                LogExportRadios.BLE -> "BLE radios"
+                LogExportRadios.BOTH -> "ui.no.gps.tagged.radios"
+                LogExportRadios.WIFI -> "ui.no.gps.tagged.wifi"
+                LogExportRadios.BLE -> "ui.no.gps.tagged.ble"
             }
-            error("No GPS-tagged $which. Settings → Tag detections with GPS, logging on, then sit.")
+            error(LanguageText.text(which))
         }
         val info = listOf(
             "model=${android.os.Build.MODEL}",
@@ -2304,7 +4555,13 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             "board=${android.os.Build.BOARD}",
             "brand=${android.os.Build.BRAND}",
         ).joinToString(",")
-        publishExport(0.48f, "Writing ${kind.label} · ${pins.size} pins")
+        publishExport(
+            0.48f,
+            LanguageText.text(
+                "ui.writing.pins",
+                mapOf("what" to kind.label(), "n" to pins.size.toString()),
+            ),
+        )
         return withContext(Dispatchers.Default) {
             GeoExport.render(
                 fmt, pins, emptyMap(), BuildConfig.VERSION_NAME, info,
@@ -2314,7 +4571,17 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     if (done == total || done % 250 == 0) {
                         val pct = 0.50f + 0.45f * done.toFloat() / total.toFloat()
                         kotlinx.coroutines.runBlocking {
-                            publishExport(pct, "Writing ${kind.label} · $done of $total")
+                            publishExport(
+                            pct,
+                            LanguageText.text(
+                                "ui.writing.progress",
+                                mapOf(
+                                    "what" to kind.label(),
+                                    "done" to done.toString(),
+                                    "total" to total.toString(),
+                                ),
+                            ),
+                        )
                         }
                     }
                 },
@@ -2325,14 +4592,14 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun clearLogs() {
         if (_export.value.active) return
         viewModelScope.launch {
-            _export.value = ExportUi(active = true, progress = 0f, message = "Clearing log…")
+            _export.value = ExportUi(active = true, progress = 0f, message = LanguageText.text("ui.clearing.log"))
             runCatching { app.logs.clear() }
                 .onSuccess { count ->
                     app.devices.bumpLogs(count)
-                    _export.value = ExportUi(cleared = true, message = "Log cleared")
+                    _export.value = ExportUi(cleared = true, message = LanguageText.text("ui.log.cleared"))
                 }
                 .onFailure { err ->
-                    _export.value = ExportUi(error = err.message ?: "Could not clear log")
+                    _export.value = ExportUi(error = err.message ?: LanguageText.text("ui.could.not.clear.log"))
                 }
         }
     }
@@ -2340,6 +4607,15 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     fun consumeShare() {
         _export.value = _export.value.copy(share = null)
     }
+
+    fun failShare(error: Throwable) {
+        _export.value = ExportUi(
+            error = ShareFailure.explain(error) ?: LanguageText.text("ui.could.not.open.share"),
+        )
+    }
+
+    private fun exportError(error: Throwable, fallbackKey: String): String =
+        ShareFailure.explain(error) ?: (error.message ?: LanguageText.text(fallbackKey))
 
     fun consumeExportNotice() {
         val cur = _export.value
@@ -2355,24 +4631,138 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
 
     private suspend fun reportCopy(copied: Long, total: Long) {
         val pct = (copied.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-        publishExport(pct, "Writing ${(copied / 1024)} KB of ${(total / 1024)} KB")
+        publishExport(
+            pct,
+            LanguageText.text(
+                "ui.writing.kb",
+                mapOf(
+                    "done" to (copied / 1024).toString(),
+                    "total" to (total / 1024).toString(),
+                ),
+            ),
+        )
     }
 
-    private suspend fun publishExport(progress: Float, message: String) {
+    /**
+     * Keeps the percent moving about twice a second while an export is active.
+     * Counted work updates [exportReal]. If the integer on screen did not change,
+     * the pump adds one point, at most 12 ahead of the real fraction and never
+     * past 96. The file write is what carries the bar. The creep only covers a
+     * short gap so that gap does not look frozen.
+     */
+    private fun ensureExportPump() {
+        if (exportPump?.isActive == true) return
+        exportPump = viewModelScope.launch {
+            while (isActive) {
+                delay(400)
+                val cur = _export.value
+                if (!cur.active || cur.spinner) continue
+                val real = exportReal
+                var shown = maxOf(exportShown, real, cur.progress)
+                val cap = minOf(0.96f, real + 0.12f)
+                val curPct = (cur.progress * 100f).toInt()
+                if ((shown * 100f).toInt() <= curPct && curPct < (cap * 100f).toInt()) {
+                    shown = (curPct + 1) / 100f
+                }
+                exportShown = shown
+                val note = exportNote.ifBlank { cur.message }
+                if ((shown * 100f).toInt() == curPct && note == cur.message) continue
+                _export.value = cur.copy(progress = shown, spinner = false, message = note)
+            }
+        }
+    }
+
+    private suspend fun publishExport(
+        progress: Float,
+        message: String,
+        spinner: Boolean = false,
+    ) {
+        val next = progress.coerceIn(0f, 1f)
+        val fresh = !_export.value.active || next + 0.05f < exportReal
+        if (fresh) {
+            exportReal = 0f
+            exportShown = 0f
+            exportPaintNs = 0L
+        }
+        val noteChanged = message != exportNote
+        exportNote = message
+        if (next > exportReal) exportReal = next
+        ensureExportPump()
+        if (spinner) {
+            paintExport(maxOf(exportReal, next), message, spinner = true)
+            return
+        }
+        val now = System.nanoTime()
+        val due = fresh ||
+            next >= 0.999f ||
+            (next >= exportShown + 0.01f && now - exportPaintNs >= 80_000_000L) ||
+            (noteChanged && now - exportPaintNs >= 80_000_000L)
+        if (!due) return
+        exportPaintNs = now
+        paintExport(maxOf(exportReal, next), message, spinner = false)
+    }
+
+    private suspend fun paintExport(progress: Float, message: String, spinner: Boolean) {
         withContext(Dispatchers.Main.immediate) {
+            val cur = _export.value
+            val shown = if (cur.active) maxOf(cur.progress, progress) else progress
+            exportShown = maxOf(exportShown, shown)
             _export.value = ExportUi(
                 active = true,
-                progress = progress.coerceIn(0f, 1f),
+                progress = shown,
+                spinner = spinner,
                 message = message,
             )
         }
-        yield()
+    }
+
+    /** Map a counted list off the main thread and move the bar with it. */
+    private suspend fun <T, R> mapRadios(
+        items: List<T>,
+        from: Float,
+        to: Float,
+        message: String,
+        transform: (T) -> R,
+    ): List<R> {
+        val n = items.size
+        val end = to.coerceIn(0f, 1f)
+        val start = from.coerceIn(0f, end)
+        if (n == 0) {
+            publishExport(end, message)
+            return emptyList()
+        }
+        return withContext(Dispatchers.Default) {
+            val out = ArrayList<R>(n)
+            val stride = (n / 32).coerceAtLeast(1)
+            for (i in items.indices) {
+                out += transform(items[i])
+                val done = i + 1
+                if (done == n || done % stride == 0) {
+                    if (!isActive) throw CancellationException()
+                    publishExport(start + (end - start) * done / n, message)
+                }
+            }
+            out
+        }
+    }
+
+    /** PDF layout and pages already report 0..1. Keep that moving, and never backwards. */
+    private fun reportPdf(start: Float, span: Float, laying: String, writing: String): (Float) -> Unit {
+        var last = start
+        return report@{ fraction ->
+            val p = fraction.coerceIn(0f, 1f)
+            val shown = start + span * p
+            if (shown < last + 0.004f && p < 0.999f) return@report
+            last = shown
+            val msg = if (p < 0.70f) laying else writing
+            kotlinx.coroutines.runBlocking { publishExport(shown, msg) }
+        }
     }
 
     private suspend fun <T> runExport(startMessage: String, block: suspend () -> T): Result<T> {
         _export.value = ExportUi(active = true, progress = 0f, message = startMessage)
         return runCatching { block() }.onFailure { err ->
-            _export.value = ExportUi(active = false, error = err.message ?: "Export failed")
+            _export.value = ExportUi(active = false, error = err.message ?: LanguageText.text("ui.export.failed"))
         }
     }
 
@@ -2407,6 +4797,33 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
         app.config.watchlist.any { it.deviceKey == deviceKey && it.alert }
     fun isFleetWatched(id: String): Boolean = app.config.watchlist.any { it.fleetId == id }
 
+    fun saveSpokenName(fleetId: String, networkName: String, label: String) {
+        updateSettings { current ->
+            current.copy(spokenNames = SpokenNames.save(current.spokenNames, fleetId, networkName, label))
+        }
+    }
+
+    fun removeSpokenName(fleetId: String, networkName: String) {
+        updateSettings { current ->
+            current.copy(spokenNames = SpokenNames.remove(current.spokenNames, fleetId, networkName))
+        }
+    }
+
+    fun updateSpokenName(id: String, networkName: String, label: String) {
+        updateSettings { current ->
+            val row = current.spokenNames.firstOrNull { it.id == id } ?: return@updateSettings current
+            current.copy(
+                spokenNames = SpokenNames.save(current.spokenNames, row.fleetId, networkName, label, id),
+            )
+        }
+    }
+
+    fun deleteSpokenName(id: String) {
+        updateSettings { current ->
+            current.copy(spokenNames = SpokenNames.delete(current.spokenNames, id))
+        }
+    }
+
     fun testWatchBeep() {
         val settings = app.config.settings
         app.alerter.playTestBeep(
@@ -2434,4 +4851,15 @@ data class HuntUi(
     val peakRssi: Int = -127,
     val samples: List<RssiSample> = emptyList(),
     val lastSeen: Long = 0L,
+    /** Where this phone heard the radio during this hunt. */
+    val trail: List<GpsSample> = emptyList(),
+    /** Where the dot is. A local picture until the walk is placed on a fix. */
+    val hereLat: Double? = null,
+    val hereLon: Double? = null,
+    /** False while the dot is still a local picture. Streets, tiles, and the place corner stay off. */
+    val onGlobe: Boolean = false,
+    /** Meters. The circle on the dot. Zero hides it. */
+    val uncertaintyM: Double = 0.0,
+    /** The phone has been tilted. Steps are paused. */
+    val holdFlat: Boolean = false,
 )

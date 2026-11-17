@@ -4,6 +4,8 @@ import android.content.Context
 import app.fieldwatch.domain.AppSettings
 import app.fieldwatch.domain.DefaultCatalog
 import app.fieldwatch.domain.FilterEngine
+import app.fieldwatch.domain.LIVE_TOUR_REV
+import app.fieldwatch.domain.offerLiveTourOnce
 import app.fieldwatch.domain.FilterPreset
 import app.fieldwatch.domain.FilterState
 import app.fieldwatch.domain.Fleet
@@ -19,7 +21,9 @@ import app.fieldwatch.domain.SignatureExchange
 import app.fieldwatch.domain.SignatureImportResult
 import app.fieldwatch.domain.SignaturePack
 import app.fieldwatch.domain.StockCatalogUpdateResult
+import app.fieldwatch.domain.TakInstall
 import app.fieldwatch.domain.WatchTarget
+import app.fieldwatch.domain.withOverlayBasemaps
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +49,7 @@ class ConfigStore(context: Context) {
     val fleets: List<Fleet> get() = _config.value.fleets
     val filter: FilterState get() = _config.value.filter
     val settings: AppSettings get() = _config.value.settings
+    val takInstallTag: String get() = _config.value.takInstallTag
     val presets: List<FilterPreset> get() = _config.value.presets
     val watchlist: List<WatchTarget> get() = _config.value.watchlist
 
@@ -64,7 +69,9 @@ class ConfigStore(context: Context) {
                     file.writeText(json.encodeToString(seeded))
                     _config.value = seeded
                 } else {
-                    val patched = patchBuiltIn(loaded)
+                    val patched = TakInstall.ensure(patchBuiltIn(loaded)).let {
+                        it.copy(settings = it.settings.offerLiveTourOnce().withOverlayBasemaps())
+                    }
                     _config.value = patched
                     if (patched != loaded) {
                         file.writeText(json.encodeToString(patched))
@@ -79,8 +86,11 @@ class ConfigStore(context: Context) {
     }
 
     suspend fun update(transform: (PersistedConfig) -> PersistedConfig) = mutex.withLock {
-        val next = transform(_config.value)
-        _config.value = next
+        writeConfig(transform(_config.value))
+    }
+
+    /** Writes first. A failed write leaves the catalog and settings already on the phone. */
+    private suspend fun writeConfig(next: PersistedConfig) {
         withContext(Dispatchers.IO) {
             val tmp = File(file.parentFile, "config.tmp")
             tmp.writeText(json.encodeToString(next))
@@ -89,11 +99,15 @@ class ConfigStore(context: Context) {
                 tmp.delete()
             }
         }
+        _config.value = next
     }
 
     suspend fun restoreDefaults() {
-        val accepted = _config.value.settings.disclaimerAccepted
-        val rev = _config.value.settings.disclaimerRev
+        val cur = _config.value
+        val accepted = cur.settings.disclaimerAccepted
+        val rev = cur.settings.disclaimerRev
+        val tag = cur.takInstallTag
+        val retired = cur.takLegacySelfRetired
         update {
             val fresh = seed()
             fresh.copy(
@@ -101,6 +115,8 @@ class ConfigStore(context: Context) {
                     disclaimerAccepted = accepted,
                     disclaimerRev = rev,
                 ),
+                takInstallTag = TakInstall.clean(tag).ifEmpty { fresh.takInstallTag },
+                takLegacySelfRetired = retired,
             )
         }
     }
@@ -110,16 +126,7 @@ class ConfigStore(context: Context) {
         if (result.error != null || (result.added == 0 && result.merged == 0)) {
             return@withLock result
         }
-        val next = _config.value.copy(fleets = merged)
-        _config.value = next
-        withContext(Dispatchers.IO) {
-            val tmp = File(file.parentFile, "config.tmp")
-            tmp.writeText(json.encodeToString(next))
-            if (!tmp.renameTo(file)) {
-                file.writeText(tmp.readText())
-                tmp.delete()
-            }
-        }
+        writeConfig(_config.value.copy(fleets = merged))
         result
     }
 
@@ -148,16 +155,7 @@ class ConfigStore(context: Context) {
         if (overlay.error != null) {
             return@withLock StockCatalogUpdateResult(error = overlay.error)
         }
-        val next = local.copy(fleets = fleets, version = pack.catalogVersion)
-        _config.value = next
-        withContext(Dispatchers.IO) {
-            val tmp = File(file.parentFile, "config.tmp")
-            tmp.writeText(json.encodeToString(next))
-            if (!tmp.renameTo(file)) {
-                file.writeText(tmp.readText())
-                tmp.delete()
-            }
-        }
+        writeConfig(local.copy(fleets = fleets, version = pack.catalogVersion))
         overlay.copy(catalogVersion = pack.catalogVersion)
     }
 
@@ -177,6 +175,11 @@ class ConfigStore(context: Context) {
             val notes = if (
                 fleet.id == "fleet-target-atrius" &&
                 fleet.notes == "Target shopping-basket tag. Dual-labels with generic iBeacon; this row is the store basket."
+            ) {
+                stock.notes
+            } else if (
+                fleet.id == "fleet-pebblebee" &&
+                fleet.notes == "Pebblebee or Motorola moto tag item finder. A tag you clip to keys or a bag."
             ) {
                 stock.notes
             } else {
@@ -1153,6 +1156,107 @@ class ConfigStore(context: Context) {
             if (extras.isNotEmpty()) fleets = (fleets + extras).sortedBy { it.name.lowercase() }
             version = CATALOG_V94
         }
+        if (version < CATALOG_V95) {
+            fleets = fleets.map { fleet ->
+                if (!fleet.builtIn || fleet.id != "fleet-remote-id") return@map fleet
+                val stock = catalog[fleet.id] ?: return@map fleet
+                fleet.copy(decode = stock.decode, notes = stock.notes)
+            }
+            version = CATALOG_V95
+        }
+        if (version < CATALOG_V96) {
+            fleets = fleets.map { fleet ->
+                if (!fleet.builtIn || fleet.id != "fleet-chipolo") return@map fleet
+                val stock = catalog[fleet.id] ?: return@map fleet
+                if (fleet.notes != "Chipolo item finder (Find Hub / Find My). A tag you clip to keys or a bag.") {
+                    return@map fleet
+                }
+                fleet.copy(notes = stock.notes)
+            }
+            version = CATALOG_V96
+        }
+        if (version < CATALOG_V97) {
+            val have = fleets.map { it.id }.toSet()
+            val extras = ADDED_IN_V97.mapNotNull { catalog[it] }.filter { it.id !in have }
+            if (extras.isNotEmpty()) fleets = (fleets + extras).sortedBy { it.name.lowercase() }
+            version = CATALOG_V97
+        }
+        if (version < CATALOG_V98) {
+            fleets = fleets.map { fleet ->
+                if (!fleet.builtIn || fleet.id != "fleet-smarttag") return@map fleet
+                val stock = catalog[fleet.id] ?: return@map fleet
+                catalog98SmartTag(fleet, stock)
+            }
+            version = CATALOG_V98
+        }
+        if (version < CATALOG_V99) {
+            fleets = fleets.map { fleet ->
+                if (!fleet.builtIn || fleet.id != "fleet-dji") return@map fleet
+                val stock = catalog[fleet.id] ?: return@map fleet
+                catalog99Dji(fleet, stock)
+            }
+            version = CATALOG_V99
+        }
+        if (version < CATALOG_V100) {
+            val migrated = catalog100Migrate(fleets, watchlist, catalog)
+            fleets = migrated.first
+            watchlist = migrated.second
+            version = CATALOG_V100
+        }
+        if (version < CATALOG_V101 || catalog101Pending(fleets)) {
+            val migrated = catalog101Migrate(fleets, watchlist)
+            fleets = migrated.first
+            watchlist = migrated.second
+            if (version < CATALOG_V101) version = CATALOG_V101
+        }
+        if (version < CATALOG_V102) {
+            fleets = catalog102Migrate(fleets, catalog)
+            version = CATALOG_V102
+        }
+        if (version < CATALOG_V103) {
+            fleets = catalog103Migrate(fleets, catalog)
+            version = CATALOG_V103
+        }
+        if (version < CATALOG_V104) {
+            fleets = catalog104Migrate(fleets, catalog)
+            version = CATALOG_V104
+        }
+        if (version < CATALOG_V105) {
+            fleets = catalog105Migrate(fleets, catalog)
+            version = CATALOG_V105
+        }
+        if (version < CATALOG_V106) {
+            fleets = catalog106Migrate(fleets, catalog)
+            version = CATALOG_V106
+        }
+        if (version < CATALOG_V107) {
+            fleets = catalog107Migrate(fleets, catalog)
+            version = CATALOG_V107
+        }
+        if (version < CATALOG_V108) {
+            fleets = catalog108Migrate(fleets, catalog)
+            version = CATALOG_V108
+        }
+        if (version < CATALOG_V109) {
+            fleets = catalog109Migrate(fleets, catalog)
+            version = CATALOG_V109
+        }
+        if (version < CATALOG_V110) {
+            fleets = catalog110Migrate(fleets, catalog)
+            version = CATALOG_V110
+        }
+        if (version < CATALOG_V111) {
+            fleets = catalog111Migrate(fleets, catalog)
+            version = CATALOG_V111
+        }
+        if (version < CATALOG_V112) {
+            fleets = catalog112Migrate(fleets, catalog)
+            version = CATALOG_V112
+        }
+        if (version < CATALOG_V113) {
+            fleets = catalog113Migrate(fleets, catalog)
+            version = CATALOG_V113
+        }
         if (!settings.darkTheme) settings = settings.copy(darkTheme = true)
         if (settings.scanControlsExpanded) settings = settings.copy(scanControlsExpanded = false)
         presets = presets.filterNot { it.isBuiltIn() && it.id in hiddenPresetIds }
@@ -1191,13 +1295,15 @@ class ConfigStore(context: Context) {
             filter = FilterState(),
             presets = FilterEngine().defaultPresets(fleets),
             watchlist = DefaultCatalog.defaultWatchlist(),
-            settings = AppSettings(),
+            settings = AppSettings(liveTourRev = LIVE_TOUR_REV),
+            takInstallTag = TakInstall.newTag(),
+            takLegacySelfRetired = true,
         )
     }
 
     companion object {
         /** Stock catalog generation. Settings footer and the GitHub pack use this. */
-        const val CATALOG_VERSION = 94
+        const val CATALOG_VERSION = 113
         private const val CATALOG_V2 = 2
         private const val CATALOG_V3 = 3
         private const val CATALOG_V4 = 4
@@ -1290,7 +1396,26 @@ class ConfigStore(context: Context) {
         private const val CATALOG_V91 = 91
         private const val CATALOG_V92 = 92
         private const val CATALOG_V93 = 93
-        private const val CATALOG_V94 = CATALOG_VERSION
+        private const val CATALOG_V94 = 94
+        private const val CATALOG_V95 = 95
+        private const val CATALOG_V96 = 96
+        private const val CATALOG_V97 = 97
+        private const val CATALOG_V98 = 98
+        private const val CATALOG_V99 = 99
+        private const val CATALOG_V100 = 100
+        private const val CATALOG_V101 = 101
+        private const val CATALOG_V102 = 102
+        private const val CATALOG_V103 = 103
+        private const val CATALOG_V104 = 104
+        private const val CATALOG_V105 = 105
+        private const val CATALOG_V106 = 106
+        private const val CATALOG_V107 = 107
+        private const val CATALOG_V108 = 108
+        private const val CATALOG_V109 = 109
+        private const val CATALOG_V110 = 110
+        private const val CATALOG_V111 = 111
+        private const val CATALOG_V112 = 112
+        private const val CATALOG_V113 = CATALOG_VERSION
         private val GENERIC_GATT_UUIDS = setOf("180A", "180D", "180F")
         private val POLICY_FLEET_IDS = setOf(
             "fleet-flock-cameras",
@@ -1656,6 +1781,9 @@ class ConfigStore(context: Context) {
         private val ADDED_IN_V94 = listOf(
             "fleet-polar",
         )
+        private val ADDED_IN_V97 = listOf(
+            "fleet-bitchat",
+        )
     }
 }
 
@@ -1698,3 +1826,409 @@ private val FS_EXT_SILABS_OUIS = setOf(
 )
 
 private val FLOCK_LOOSE_NAMES = setOf("FLOCK", "FLCK", "CONDOR", "FALCON", "SPARROW")
+
+private const val SMARTTAG_NOTES_BEFORE_V98 =
+    "Samsung SmartTag / SmartTag+ item finder. Addresses often rotate."
+
+private const val DJI_NOTES_BEFORE_V99 =
+    "DJI aircraft, controller, or setup Wi-Fi. Handheld Osmo cameras are the Osmo row. " +
+        "Power stations named Power2000 are the DJI Power row. " +
+        "In-flight digital license plate is the Remote ID row."
+
+internal val ADDED_IN_V100 = listOf(
+    "fleet-elrs",
+    "fleet-xiaomi-mihome",
+    "fleet-ezviz",
+)
+
+/**
+ * Catalog 100 adds ExpressLRS, Xiaomi Mi Home, and EZVIZ when those ids are
+ * missing. A custom row with the same id stays. ExpressLRS is a drone, so it
+ * is bookmarked once. Xiaomi and EZVIZ are not.
+ */
+internal fun catalog100Migrate(
+    fleets: List<Fleet>,
+    watchlist: List<WatchTarget>,
+    stock: Map<String, Fleet>,
+): Pair<List<Fleet>, List<WatchTarget>> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V100.mapNotNull { stock[it] }.filter { it.id !in have }
+    val nextFleets = if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+    val watched = watchlist.mapNotNull { it.fleetId }.toSet()
+    val addWatch = DefaultCatalog.defaultWatchlist().filter {
+        it.fleetId in ADDED_IN_V100 && it.fleetId !in watched
+    }
+    val nextWatch = if (addWatch.isEmpty()) watchlist else watchlist + addWatch
+    return nextFleets to nextWatch
+}
+
+/**
+ * True when a built-in Novatel or Hatch row still has the catalog 101 address,
+ * or the built-in Novatel row has no rules left. Update stock catalog on an
+ * older app can save catalog 101 and leave those rows in place.
+ */
+internal fun catalog101Pending(fleets: List<Fleet>): Boolean =
+    fleets.any { fleet ->
+        if (!fleet.builtIn) return@any false
+        when (fleet.id) {
+            "fleet-novatel" -> fleet.rules.isEmpty() || fleet.rules.any { rule ->
+                rule.kind == RuleKind.OUI && rule.text.equals("28:80:A2", true)
+            }
+            "fleet-hatch" -> fleet.rules.any { rule ->
+                rule.kind == RuleKind.OUI && rule.text.equals("C8:FA:9C", true)
+            }
+            else -> false
+        }
+    }
+
+/**
+ * Catalog 101 drops address 28:80:A2 from the built-in Novatel row. That
+ * address stays on Inseego. A Novatel row with no rules left is removed, and
+ * its watch goes with it. A rule the operator added stays, and a custom copy
+ * that is not built-in stays. Hatch drops address C8:FA:9C. The company ID
+ * and the Hatch names stay. [catalog101Pending] runs this again when the
+ * saved catalog number is already 101 and the old rows are still there.
+ */
+internal fun catalog101Migrate(
+    fleets: List<Fleet>,
+    watchlist: List<WatchTarget>,
+): Pair<List<Fleet>, List<WatchTarget>> {
+    val next = fleets.mapNotNull { fleet ->
+        if (!fleet.builtIn) return@mapNotNull fleet
+        when (fleet.id) {
+            "fleet-novatel" -> {
+                val rules = fleet.rules.filterNot { rule ->
+                    rule.kind == RuleKind.OUI && rule.text.equals("28:80:A2", true)
+                }
+                if (rules.isEmpty()) null else fleet.copy(rules = rules)
+            }
+            "fleet-hatch" -> fleet.copy(
+                rules = fleet.rules.filterNot { rule ->
+                    rule.kind == RuleKind.OUI && rule.text.equals("C8:FA:9C", true)
+                },
+            )
+            else -> fleet
+        }
+    }
+    val removedNovatel = fleets.any { it.builtIn && it.id == "fleet-novatel" } &&
+        next.none { it.id == "fleet-novatel" }
+    val watch = if (removedNovatel) {
+        watchlist.filterNot { it.fleetId == "fleet-novatel" }
+    } else {
+        watchlist
+    }
+    return next to watch
+}
+
+internal val ADDED_IN_V102 = listOf(
+    "fleet-icom-id52",
+    "fleet-icom-vs3",
+    "fleet-yaesu-ssm-bt10",
+    "fleet-yaesu-ssm-bt20",
+    "fleet-kenwood-khs-55bt",
+    "fleet-kenwood-khs-56bt",
+    "fleet-vgc-bhm-88",
+    "fleet-benshi-radio",
+    "fleet-ble-ptt-button",
+)
+
+/**
+ * Catalog 102 adds Icom ID-52, the wireless microphones, the Benshi radios,
+ * and the BLE push-to-talk buttons when those ids are missing. A custom row
+ * with the same id stays. The rows are not bookmarked.
+ */
+internal fun catalog102Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V102.mapNotNull { stock[it] }.filter { it.id !in have }
+    return if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+}
+
+private const val META_GLASSES_NOTES_BEFORE_V103 =
+    "Ray-Ban Meta, Oakley Meta, or Meta Display smart glasses, or a Quest / other Meta wearable."
+
+internal val ADDED_IN_V103 = listOf(
+    "fleet-meta-quest",
+)
+
+private const val FIND_HUB_NOTES_BEFORE_V104 =
+    "Google Find Hub / Find My Device network tag (Chipolo, Pebblebee, moto tag, and other partners). " +
+        "Nearby vs separated frames. Separated mode can hold a MAC about a day. " +
+        "Addresses otherwise rotate. Pattern match, not that bag."
+
+private const val REMOTE_ID_NOTES_BEFORE_V106 =
+    "In-flight drone digital license plate (ASTM / FAA Remote ID). Decoded fields can show ID, position, " +
+        "heading, and operator location (takeoff, live GPS, or a fixed point). EU class shows only when the " +
+        "plate says EU. The French Direct Remote ID vendor IE labels this row too. That plate does not fill " +
+        "position or the operator pin. Pattern match, not a tail number. Wi-Fi Remote ID often misses on stock Android."
+
+internal val ADDED_IN_V107 = listOf(
+    "fleet-homekit",
+)
+
+internal val ADDED_IN_V108 = listOf(
+    "fleet-matter",
+)
+
+internal const val AMAZON_NOTES_BEFORE_V109 =
+    "Amazon Echo, Fire, or Kindle when it advertises. Not every AmazonBasics gadget."
+
+internal val ADDED_IN_V109 = listOf(
+    "fleet-sidewalk",
+)
+
+internal val ADDED_IN_V110 = listOf(
+    "fleet-bthome",
+)
+
+internal val ADDED_IN_V111 = listOf(
+    "fleet-exposure-notification",
+)
+
+/**
+ * Catalog 111 adds Exposure Notification when that id is missing. A custom
+ * row with the same id stays. The row is not bookmarked.
+ */
+internal fun catalog111Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V111.mapNotNull { stock[it] }.filter { it.id !in have }
+    return if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+}
+
+internal val ADDED_IN_V112 = listOf(
+    "fleet-70mai",
+    "fleet-blackvue",
+    "fleet-chb",
+    "fleet-escort",
+    "fleet-galaxy-buds",
+    "fleet-galaxy-watch",
+    "fleet-gard-pro",
+    "fleet-google-cast",
+    "fleet-gt201",
+    "fleet-harpbt",
+    "fleet-hume",
+    "fleet-jlab",
+    "fleet-levoit",
+    "fleet-melk",
+    "fleet-midea",
+    "fleet-neewer",
+    "fleet-owlet",
+    "fleet-platco",
+    "fleet-samsung-tv",
+    "fleet-scentair",
+    "fleet-sleeptracker",
+    "fleet-soundcore",
+    "fleet-tandem",
+    "fleet-vizio",
+    "fleet-whoop",
+    "fleet-zebra",
+)
+
+internal const val SAMSUNG_APPLIANCE_NOTES_BEFORE_V112 =
+    "Samsung Family Hub fridge, range, or oven setup Wi-Fi. Not a SmartTag."
+
+internal const val OSMO_NOTES_BEFORE_V112 =
+    "DJI Osmo handheld / action camera (Action, Pocket, 360, Nano). Not a flying DJI aircraft."
+
+internal const val UNIFI_NOTES_BEFORE_V112 =
+    "UniFi / Ubiquiti name on Wi-Fi or BLE. Prefer UniFi AP for BSSID hits. Instant cameras stay on UniFi Protect."
+
+/**
+ * Catalog 112 adds the sit families when those ids are missing. A custom row
+ * with the same id stays. The rows are not bookmarked. The Samsung appliance,
+ * Osmo, and UniFi notes update only while they still have the previous sentence.
+ */
+internal fun catalog112Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V112.mapNotNull { stock[it] }.filter { it.id !in have }
+    val next = if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+    return next.map { fleet ->
+        if (!fleet.builtIn) return@map fleet
+        val previous = when (fleet.id) {
+            "fleet-samsung-appliance" -> SAMSUNG_APPLIANCE_NOTES_BEFORE_V112
+            "fleet-osmo" -> OSMO_NOTES_BEFORE_V112
+            "fleet-unifi" -> UNIFI_NOTES_BEFORE_V112
+            else -> return@map fleet
+        }
+        val fresh = stock[fleet.id] ?: return@map fleet
+        if (fleet.notes != previous) fleet else fleet.copy(notes = fresh.notes)
+    }
+}
+
+internal val ADDED_IN_V113 = listOf(
+    "fleet-aina-smart-button",
+    "fleet-ble-kiss-tnc",
+    "fleet-coda-ptt-button",
+    "fleet-icom-ic705",
+    "fleet-icom-id5200",
+    "fleet-icom-ut137",
+    "fleet-tidradio-td-h9",
+    "fleet-wireless-cps-radio",
+)
+
+/**
+ * Catalog 113 adds the two-way rows when those ids are missing. A custom row
+ * with the same id stays. The rows are not bookmarked.
+ */
+internal fun catalog113Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V113.mapNotNull { stock[it] }.filter { it.id !in have }
+    return if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+}
+
+/**
+ * Catalog 110 adds BTHome when that id is missing. A custom row with the
+ * same id stays. The row is not bookmarked.
+ */
+internal fun catalog110Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V110.mapNotNull { stock[it] }.filter { it.id !in have }
+    return if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+}
+
+/**
+ * Catalog 109 adds Sidewalk when that id is missing. A custom row with the
+ * same id stays. The row is not bookmarked. The Amazon note gains one sentence
+ * when the built-in row still has the catalog 108 sentence. An edited note stays.
+ */
+internal fun catalog109Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V109.mapNotNull { stock[it] }.filter { it.id !in have }
+    val next = if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+    return next.map { fleet ->
+        if (!fleet.builtIn || fleet.id != "fleet-amazon") return@map fleet
+        val fresh = stock[fleet.id] ?: return@map fleet
+        if (fleet.notes != AMAZON_NOTES_BEFORE_V109) fleet else fleet.copy(notes = fresh.notes)
+    }
+}
+
+/**
+ * Catalog 108 adds Matter when that id is missing. A custom row with the
+ * same id stays. The row is not bookmarked.
+ */
+internal fun catalog108Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V108.mapNotNull { stock[it] }.filter { it.id !in have }
+    return if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+}
+
+/**
+ * Catalog 107 adds HomeKit when that id is missing. A custom row with the
+ * same id stays. The row is not bookmarked.
+ */
+internal fun catalog107Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V107.mapNotNull { stock[it] }.filter { it.id !in have }
+    return if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+}
+
+/**
+ * Catalog 106 copies the Remote ID note when the built-in row still says the
+ * French plate does not fill a position. An edited note stays. A custom copy
+ * that is not built-in is left alone.
+ */
+internal fun catalog106Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> = fleets.map { fleet ->
+    if (!fleet.builtIn || fleet.id != "fleet-remote-id") return@map fleet
+    val fresh = stock[fleet.id] ?: return@map fleet
+    if (fleet.notes != REMOTE_ID_NOTES_BEFORE_V106) fleet else fleet.copy(notes = fresh.notes)
+}
+
+/**
+ * Catalog 105 copies the Find Hub decode onto the built-in row. The ephemeral
+ * id is 20 or 32 bytes, from the payload length. The hashed flags line says
+ * whether that byte is present. A custom copy that is not built-in is left alone.
+ */
+internal fun catalog105Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> = fleets.map { fleet ->
+    if (!fleet.builtIn || fleet.id != "fleet-find-hub") return@map fleet
+    val fresh = stock[fleet.id] ?: return@map fleet
+    fleet.copy(decode = fresh.decode)
+}
+
+/**
+ * Catalog 104 copies the Find Hub decode onto the built-in row. Frame 0x40 is
+ * normal mode. The stock note is copied only when the row still has the catalog
+ * 103 sentence. An edited note stays. A custom copy that is not built-in is left alone.
+ */
+internal fun catalog104Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> = fleets.map { fleet ->
+    if (!fleet.builtIn || fleet.id != "fleet-find-hub") return@map fleet
+    val fresh = stock[fleet.id] ?: return@map fleet
+    val notes = if (fleet.notes == FIND_HUB_NOTES_BEFORE_V104) fresh.notes else fleet.notes
+    fleet.copy(decode = fresh.decode, notes = notes)
+}
+
+/**
+ * Catalog 103 adds Meta Quest when that id is missing. A custom row with the
+ * same id stays. The row is not bookmarked. The glasses note is copied only
+ * when the built-in row still has the catalog 102 sentence. An edited note stays.
+ */
+internal fun catalog103Migrate(
+    fleets: List<Fleet>,
+    stock: Map<String, Fleet>,
+): List<Fleet> {
+    val have = fleets.map { it.id }.toSet()
+    val extras = ADDED_IN_V103.mapNotNull { stock[it] }.filter { it.id !in have }
+    val added = if (extras.isEmpty()) fleets else (fleets + extras).sortedBy { it.name.lowercase() }
+    return added.map { fleet ->
+        if (!fleet.builtIn || fleet.id != "fleet-meta-glasses") return@map fleet
+        val fresh = stock[fleet.id] ?: return@map fleet
+        if (fleet.notes != META_GLASSES_NOTES_BEFORE_V103) fleet else fleet.copy(notes = fresh.notes)
+    }
+}
+
+/**
+ * Catalog 99 copies the DJI note when the built-in row still has the catalog 98
+ * sentence. The older DroneID vendor IE is added by the stock-rule merge. A custom
+ * copy that is not built-in is left alone. An edited note stays.
+ */
+internal fun catalog99Dji(fleet: Fleet, stock: Fleet): Fleet {
+    if (!fleet.builtIn || fleet.id != "fleet-dji" || fleet.id != stock.id) return fleet
+    val notes = if (fleet.notes == DJI_NOTES_BEFORE_V99) stock.notes else fleet.notes
+    return fleet.copy(notes = notes)
+}
+
+/**
+ * Catalog 98 drops Samsung company ID 0x0075 from the built-in SmartTag row.
+ * That ID is Samsung Electronics generally. A rule the operator added with a
+ * different company ID stays. A custom copy that is not built-in is left alone.
+ * The stock note is copied only when the row still has the catalog 97 sentence.
+ */
+internal fun catalog98SmartTag(fleet: Fleet, stock: Fleet): Fleet {
+    if (!fleet.builtIn || fleet.id != "fleet-smarttag" || fleet.id != stock.id) return fleet
+    val rules = fleet.rules.filterNot { rule ->
+        rule.kind == RuleKind.MANUFACTURER_ID && rule.companyId == 0x0075
+    }
+    val notes = if (fleet.notes == SMARTTAG_NOTES_BEFORE_V98) stock.notes else fleet.notes
+    return fleet.copy(rules = rules, notes = notes)
+}

@@ -1,5 +1,7 @@
 package app.fieldwatch.alert
 
+import app.fieldwatch.domain.LanguageText
+
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -28,6 +30,7 @@ import app.fieldwatch.domain.Fleet
 import app.fieldwatch.domain.MacUtil
 import app.fieldwatch.domain.RadioBookmarks
 import app.fieldwatch.domain.Sighting
+import app.fieldwatch.domain.SpokenName
 import app.fieldwatch.domain.WatchTarget
 import app.fieldwatch.domain.spokenWatchPhrase
 import app.fieldwatch.domain.testWatchPhrase
@@ -78,11 +81,12 @@ class Alerter(private val context: Context) {
         visibleOnLive: (Sighting) -> Boolean = { !it.gone },
         arrivalsOnly: Boolean = false,
         demoMode: Boolean = false,
+        spokenNames: List<SpokenName> = emptyList(),
     ) {
         if (!alertsOn || watchlist.isEmpty()) return
         fireNewAppearances(
             devices, fleets, watchlist, beepOn, voiceOn, voiceWhat, shadeOn,
-            visibleOnLive, arrivalsOnly, demoMode,
+            visibleOnLive, arrivalsOnly, demoMode, spokenNames,
         )
     }
 
@@ -147,6 +151,156 @@ class Alerter(private val context: Context) {
         manager.cancel(GNSS_NOTE_ID)
     }
 
+    /**
+     * Trusted-network alert. Own channel so it can be muted without muting the watchlist.
+     * [title] and [body] must not include coordinates. Phrase is null when voice is off.
+     */
+    fun trustedAlert(title: String, body: String, phrase: String?, beep: Boolean, shade: Boolean) {
+        if (shade) {
+            ensureTrustedChannel()
+            val pending = PendingIntent.getActivity(
+                context,
+                TRUSTED_NOTE_ID,
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val note = NotificationCompat.Builder(context, TRUSTED_CHANNEL)
+                .setSmallIcon(R.drawable.ic_stat_fieldwatch)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setSilent(true)
+                .setContentIntent(pending)
+                .build()
+            manager.notify(TRUSTED_NOTE_ID, note)
+        } else {
+            manager.cancel(TRUSTED_NOTE_ID)
+        }
+        if (beep) beep(holdFocus = phrase.isNullOrBlank())
+        if (!phrase.isNullOrBlank()) {
+            prepareVoice()
+            queueVoice(phrase, afterBeep = beep)
+        }
+    }
+
+    fun clearTrustedNote() {
+        manager.cancel(TRUSTED_NOTE_ID)
+    }
+
+    /**
+     * Cell connection monitoring. Own channel so it can be muted without muting the watchlist.
+     * [title] is the warning sentence. [body] has no cell id and no coordinates.
+     */
+    fun cellAlert(title: String, body: String, phrase: String?, beep: Boolean, shade: Boolean) {
+        if (shade) {
+            ensureCellChannel()
+            val pending = PendingIntent.getActivity(
+                context,
+                CELL_NOTE_ID,
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val note = NotificationCompat.Builder(context, CELL_CHANNEL)
+                .setSmallIcon(R.drawable.ic_stat_fieldwatch)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(body))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setSilent(true)
+                .setContentIntent(pending)
+                .build()
+            manager.notify(CELL_NOTE_ID, note)
+        } else {
+            manager.cancel(CELL_NOTE_ID)
+        }
+        if (beep) beep(holdFocus = phrase.isNullOrBlank())
+        if (!phrase.isNullOrBlank()) {
+            prepareVoice()
+            queueVoice(phrase, afterBeep = beep)
+        }
+    }
+
+    fun clearCellNote() {
+        manager.cancel(CELL_NOTE_ID)
+    }
+
+    /**
+     * Tracker monitoring. Low and silent. [text] has no coordinates and no owner claim.
+     * The tap opens that radio.
+     */
+    fun trackerNote(title: String, text: String, deviceKey: String) {
+        ensureTrackerChannel()
+        val pending = PendingIntent.getActivity(
+            context,
+            TRACKER_NOTE_ID,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra(EXTRA_DEVICE_KEY, deviceKey)
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val note = NotificationCompat.Builder(context, TRACKER_CHANNEL)
+            .setSmallIcon(R.drawable.ic_stat_fieldwatch)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setSilent(true)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        manager.notify(TRACKER_NOTE_ID, note)
+    }
+
+    fun clearTrackerNote() {
+        manager.cancel(TRACKER_NOTE_ID)
+    }
+
+    /**
+     * A known mapped sensor ahead. Speaks [text], posts it on the layer channel, and pulses once.
+     * [text] has no coordinates. This does not use the watchlist beep.
+     */
+    fun flockNote(text: String) {
+        if (text.isBlank()) return
+        prepareVoice()
+        main.post {
+            ensureFlockChannel()
+            val pending = PendingIntent.getActivity(
+                context,
+                FLOCK_NOTE_ID,
+                Intent(context, MainActivity::class.java).apply {
+                    flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                },
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            val note = NotificationCompat.Builder(context, FLOCK_CHANNEL)
+                .setSmallIcon(R.drawable.ic_stat_layer)
+                .setContentTitle(text)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setAutoCancel(true)
+                .setSilent(true)
+                .setContentIntent(pending)
+                .build()
+            manager.notify(FLOCK_NOTE_ID, note)
+            flockPulse()
+            speakOver(text)
+        }
+    }
+
+    fun clearFlockNote() {
+        main.post { manager.cancel(FLOCK_NOTE_ID) }
+    }
+
     /** Short Hunt geiger tick. Not the watchlist double-pip. */
     fun huntTick(beepOn: Boolean, vibrateOn: Boolean) {
         if (vibrateOn) main.post { huntPulse() }
@@ -168,6 +322,7 @@ class Alerter(private val context: Context) {
         visibleOnLive: (Sighting) -> Boolean,
         arrivalsOnly: Boolean,
         demoMode: Boolean,
+        spokenNames: List<SpokenName>,
     ) {
         val now = System.currentTimeMillis()
         val onAir = devices.filter { !it.gone }
@@ -201,7 +356,9 @@ class Alerter(private val context: Context) {
                 }
                 if (beepOn || voiceOn) _flashes.tryEmit(device.key)
                 if (voiceOn && voicePhrase == null) {
-                    voicePhrase = spokenWatchPhrase(device, fleets, voiceWhat, target)
+                    voicePhrase = spokenWatchPhrase(
+                        device, fleets, voiceWhat, target, spokenNames, watchlist,
+                    )
                 }
             }
         }
@@ -237,7 +394,7 @@ class Alerter(private val context: Context) {
         )
         val note = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_fieldwatch)
-            .setContentTitle("sw33p3r_ watchlist")
+            .setContentTitle(LanguageText.text("ui.fieldwatch.watchlist"))
             .setContentText("$label  ${device.rssi} dBm  ${MacUtil.screenMac(device.mac, demoMode)}")
             .setStyle(
                 NotificationCompat.BigTextStyle().bigText(
@@ -425,6 +582,20 @@ class Alerter(private val context: Context) {
         }
     }
 
+    /** Speak now, interrupting a phrase already in progress. The engine keeps the line if it is still starting. */
+    private fun speakOver(text: String) {
+        val phrase = text.trim()
+        if (phrase.isEmpty()) return
+        pendingSpeak = phrase
+        ensureTts()
+        if (!ttsReady) return
+        if (speaking) {
+            speaking = false
+            utteranceStarted = false
+        }
+        startSpeak(phrase)
+    }
+
     private fun speakClassName(text: String) {
         val phrase = text.trim()
         if (phrase.isEmpty()) return
@@ -535,7 +706,7 @@ class Alerter(private val context: Context) {
         if (manager.getNotificationChannel(CHANNEL) == null) {
             manager.createNotificationChannel(
                 NotificationChannel(CHANNEL, "Watchlist", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Appearing signatures and devices on your watchlist. Beep is played separately."
+                    description = LanguageText.text("ui.appearing.signatures.devices.watchlist")
                     enableVibration(true)
                     enableLights(true)
                     setSound(null, null)
@@ -548,17 +719,91 @@ class Alerter(private val context: Context) {
         if (Build.VERSION.SDK_INT < 26) return
         if (manager.getNotificationChannel(GNSS_CHANNEL) != null) return
         manager.createNotificationChannel(
-            NotificationChannel(GNSS_CHANNEL, "GNSS interference", NotificationManager.IMPORTANCE_HIGH).apply {
-                description = "Possible GNSS interference or spoofing on this phone. Beep and voice are separate."
+            NotificationChannel(GNSS_CHANNEL, LanguageText.text("settings.topic.gnss"), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = LanguageText.text("ui.possible.gnss.interference.spoofing")
                 setSound(null, null)
             },
         )
     }
 
+    private fun ensureTrustedChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        if (manager.getNotificationChannel(TRUSTED_CHANNEL) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(TRUSTED_CHANNEL, LanguageText.text("settings.topic.trusted"), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = LanguageText.text("trusted.help")
+                setSound(null, null)
+            },
+        )
+    }
+
+    private fun ensureCellChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        if (manager.getNotificationChannel(CELL_CHANNEL) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(CELL_CHANNEL, LanguageText.text("settings.topic.cell"), NotificationManager.IMPORTANCE_HIGH).apply {
+                description = LanguageText.text("cell.intro")
+                setSound(null, null)
+            },
+        )
+    }
+
+    private fun ensureTrackerChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        if (manager.getNotificationChannel(TRACKER_CHANNEL) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                TRACKER_CHANNEL,
+                LanguageText.text("settings.topic.tracker"),
+                NotificationManager.IMPORTANCE_LOW,
+            ).apply {
+                description = LanguageText.text("tracker.follow.note")
+                setSound(null, null)
+                enableVibration(false)
+            },
+        )
+    }
+
+    private fun ensureFlockChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        if (manager.getNotificationChannel(FLOCK_CHANNEL) != null) return
+        manager.createNotificationChannel(
+            NotificationChannel(
+                FLOCK_CHANNEL,
+                LanguageText.text("settings.layer.channel"),
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = LanguageText.text("settings.layer.channel.body")
+                setSound(null, null)
+                enableVibration(false)
+            },
+        )
+    }
+
+    private fun flockPulse() {
+        val vibrator = if (Build.VERSION.SDK_INT >= 31) {
+            val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+            vm.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        }
+        if (!vibrator.hasVibrator()) return
+        vibrator.vibrate(VibrationEffect.createOneShot(200, VibrationEffect.DEFAULT_AMPLITUDE))
+    }
+
     companion object {
         const val CHANNEL = "fieldwatch_watch_v3"
         const val GNSS_CHANNEL = "fieldwatch_gnss"
+        const val FLOCK_CHANNEL = "fieldwatch_map_layers"
+        const val TRUSTED_CHANNEL = "fieldwatch_trusted"
+        const val CELL_CHANNEL = "fieldwatch_cell"
+        const val TRACKER_CHANNEL = "fieldwatch_tracker"
         private const val GNSS_NOTE_ID = 71_001
+        private const val TRUSTED_NOTE_ID = 71_002
+        private const val CELL_NOTE_ID = 71_003
+        private const val TRACKER_NOTE_ID = 71_004
+        private const val FLOCK_NOTE_ID = 72_010
         const val EXTRA_DEVICE_KEY = "device_key"
         private const val FREQ_HZ = 1050.0
         private const val PIP_MS = 85

@@ -4,6 +4,254 @@ Newest first. This is Fieldwatch (`app.fieldwatch`). Each build below is what Se
 
 Fieldwatch continues the Spectre 1.2.14 field build under a new name, application id, and the MIT License. It does not replace Spectre on a phone.
 
+## Unreleased
+
+- Catalog 113 names two-way radios. A BLE KISS TNC matches the KISS service. Icom IC-705 matches the Bluetooth name ICOM BT(IC-705) and the Wi-Fi name IC-705. Icom ID-5200 matches ICOM BT(ID-5200). Icom UT-137 matches ICOM BT-003. A Blu-PTT button matches its advertised service. TIDRADIO TD-H9 matches a name that starts with TD-H9. An AINA PTT Smart Button matches ASB plus six characters. A handheld with Wireless CPS on matches the exact name walkie-talkie. That name does not say the brand or model. None of these beep.
+- Catalog 112 names radios this phone kept seeing. Samsung TVs and soundbars match the setup name. Google Cast matches service FEA0. Levoit, MELK, Midea, Zebra, JLab, ScentAir, Escort, Gard Pro, Vizio, Owlet, Tandem t:slim, SleepTracker, WHOOP, soundcore, Hume, Platco, NEEWER, 70mai, BlackVue, Galaxy Watch, and Galaxy Buds each have a row. CHB, HarpBT, and GT201 match a name prefix. The product behind those three is not identified. Epson also matches an ET- Series name. A Samsung oven on Bluetooth matches the appliance row. Osmo matches a Wi-Fi name that starts with osmo_. UniFi matches a U6- or UXG model name. None of these beep.
+
+## 1.1.44 — 13 November 2026
+
+- Exposure Notification names a Bluetooth advertisement on service FD6F. The radio page says the identifier is there and that the metadata is encrypted. It does not show those bytes. It does not beep. Catalog 111 adds the signature.
+- BTHome names a Bluetooth sensor that uses service FCD2. The radio page shows the measurements the device advertises, including temperature, humidity, battery, door, and motion. An open door or window shows on the live row. Encrypted packets only say they are encrypted. Catalog 110 adds the signature. It does not beep.
+- Remote ID authentication shows the type, page, and time the plate sends. The signature bytes stay off the page. It does not check the signature. A location message in the same session keeps that block. It does not beep.
+- Amazon Sidewalk names a Bluetooth device that sends the AMA service and Amazon's company ID. Registration mode shows on the live row. The radio page shows the beacon type and the battery band. It does not show the hidden id. An Echo without that service stays Amazon. Catalog 109 adds the signature. It does not beep.
+- Matter setup names a Bluetooth device that is offering Matter commissioning. The radio page shows the vendor ID, the product ID, and the discriminator the device sends. A live row says Matter setup. Proximity ranging is named and does not show the hidden id. Catalog 108 adds the signature. It does not beep.
+- HomeKit names the category and the paired line the accessory broadcasts. An unpaired accessory shows that category on the live row. Paired does not. Catalog 107 adds the signature. It does not beep.
+- French Direct Remote ID can fill the aircraft position, altitude, speed, course, and the takeoff pin when that Wi-Fi beacon is present. Height above takeoff shows on the radio page and is not the aircraft pin. A CTA-2063 serial on that plate can name the maker. The three-letter code does not. A later French plate in the same session replaces the stored one. Android 11 or newer. Catalog 106 updates the Remote ID note when it still says the French plate does not fill a position.
+- Compare and Debrief keep the percent moving on a large sit. Writing the text file is most of that bar, in pieces, so it climbs until the file is done. A step with no count still creeps the percent, so the wait does not look stuck.
+- A Wi-Fi access point can say what kind of network it is, whether it has internet, a venue, and a hotspot id. Detail shows that when the beacon includes it. Android 11 or newer. The access point sets these. They are not checked.
+- Compare (text) and Debrief (text) share a text file. A large report no longer puts the whole text in the share handoff.
+- If a share cannot open, Fieldwatch says why. That includes the phone being out of storage, out of memory, or the share being too large to open.
+- Google Find Hub shows a 20-byte or 32-byte ephemeral id, chosen from the payload length. When the hashed flags byte is in the advertisement, the line says it is present. That byte is encrypted, so the value is not shown. Catalog 105 copies this onto a phone that already saved the row.
+- Google Find Hub frame 0x40 is labeled not separated. That frame means unwanted-tracking protection is off. It does not say the tag is near its owner. Frame 0x41 stays separated. Catalog 104 copies that wording onto a phone that already saved the row.
+- Settings → Tracker monitoring has two warnings, both off until you turn one on. Separated tag with you warns when a tag says it is away from its owner, this phone has heard it for 30 minutes with no gap over 20 minutes, and this phone's GPS has three spots at least 100 m apart. Heard at two places warns when a finder with a stable address reaches two stops. The places list stays either way. Open radio opens that radio. Dismiss keeps that warning down while the same condition continues. There is no beep. A quiet notification shows the same lines when Fieldwatch is not on screen.
+- Pebblebee matches Bluetooth service FA25 as well as the Pebblebee and moto tag names. A tag that leaves its name off still matches. That service does not say whether the tag is away from its owner. Find Hub and DULT stay on their own rows. The row does not beep.
+- A Find My advertisement of 25 bytes says it is broadcasting a public key. A 2-byte advertisement says it is the short form, often a tag near its owner, and that this is not certain. The battery level is shown only when the recent-owner bit is set. The AirTag signature is unchanged.
+- Bundled language files are written for this version.
+- A language file can be up to 352 KiB. The English template fits in that limit.
+
+## 1.1.43 — 9 November 2026
+
+- A Bluetooth name of Quest, or one that starts with Quest followed by a space or a hyphen, or one that starts with Meta Quest, is Meta Quest. Quest 3S is that row. It is not labeled Ray-Ban / Meta glasses and it does not beep. A Meta company ID or service FEB8 without that name still matches the glasses row.
+- Bluetooth channel and frequency are left blank. Android does not report the advertising channel, so the radio page and the log no longer show 2402 MHz as if it were measured. Wi-Fi channel and frequency stay. An older log row that already says 2402 stays as it was.
+- Signature candidates keep a full custom service UUID. They no longer cut it down to four hex digits that can match a different Bluetooth service. A standard 16-bit service still meets its short form and its full Bluetooth UUID.
+- A Wi-Fi signal of 0 is treated as no reading. It no longer sorts as the strongest radio or paints as a loud signal. A real reading still does.
+- The log keeps the Bluetooth advertisement the phone already stored, up to 512 bytes. The raw field is that advertisement. Manufacturer data is its own field. A log row already saved stays as it was.
+- Named radios is its own row on the Settings list, after Alerts. Signature and network stays on Alerts.
+- Radio detail can show GitHub catalog request. It appears on an unmatched Bluetooth radio when the phone has a network that claims internet, the name looks like a factory model, and that name has been heard on two addresses this session. The tap opens a GitHub issue draft in the browser. Nothing is sent before that tap. The draft leaves out the address suffix, this phone's location, and the raw advertisement.
+- Signatures → Class A–Z lists every class, including one with no signatures. The count is 0 until a signature is in that class. Body-worn stays under Wearables.
+- Microsoft Nearby Sharing names the device type and whether sharing is set to My devices only or Everyone nearby. When it is Everyone nearby, the line includes the computer name from that advertisement. That background beacon is no longer called Swift Pair.
+- Catalog 101 removes the Novatel Wireless row. Address 28:80:A2 stays on Inseego and does not beep as public safety. Hatch drops address C8:FA:9C. The Hatch names and company ID stay. Opening this app drops that row and that address from the built-in signatures, including when Update stock catalog already saved catalog 101 and left them in place. A rule you added stays. A custom copy of Novatel that is not built-in stays.
+- Filters add Two-way radios and Military. Two-way radios has Icom ID-52, from the Bluetooth name ICOM BT(ID-52) while the radio is waiting to pair, plus wireless microphones Icom VS-3, Yaesu SSM-BT10, Yaesu SSM-BT20, Kenwood KHS-55BT, Kenwood KHS-56BT, and VGC BHM-88. On those microphones, Bluetooth is how the microphone works. Each row matches the published name on a Low Energy advertisement. A name that only appears on the Classic link stays quiet. Military has no signatures yet. Catalog 102 also matches Benshi-platform radios by the exact Bluetooth name UV-PRO, UV-50PRO, GA-5WB, VR-N75, VR-N76, VR-N7500, VR-N7600, or DB50-B, and BLE push-to-talk buttons named PTT-Z, PTT-AZ, or PTT-Z01. None of them beep.
+- A signature file that uses a class, a rule, or a radio this app does not know asks you to update Fieldwatch first. Update now on that message checks for an app update. The catalog on the phone stays as it is. The same message is used for Update stock catalog, Import signatures, and Import settings.
+- Wi-Fi vendor tags name WPA, WMM, WPS, Wi-Fi Direct, Miracast, Hotspot 2.0, MBO-OCE, EasyMesh, and OWE transition. A WMM tag no longer reads as Microsoft. Other vendor tags still show the company that owns the OUI.
+- Catalog 100 adds ExpressLRS setup Wi-Fi, Xiaomi Mi Home service FE95, and an EZVIZ setup network. Each names the family, not one model. ExpressLRS beeps like the other drone rows. The other two do not.
+- Catalog 99: DJI also matches the older DroneID Wi-Fi beacon, vendor IE 26:37:12. That labels the aircraft. It does not fill a position. ASTM Remote ID stays on the Remote ID row. Android 11 or newer can see that beacon field.
+
+## 1.1.42 — 5 November 2026
+
+- A live sit map keeps up on a long drive. The line, the stops, and the camera marks stay where they were.
+- On Reports → Path, the camera picture for that view slides with the map. Where two wedges of the same color overlap, the tint is painted once.
+- Hunt on a radio's detail page starts a new hunt. Leaving Hunt clears the walk.
+- When the signal is lost, the large number reads - - and the line under it reads -- dBm · Signal Lost.
+- Filters can hide randomized Bluetooth. Wi-Fi stays. The sit still keeps those radios.
+- Bundled language files are written for this version. Signal Lost and Hide randomized Bluetooth are the lines added since 1.1.41.
+
+## 1.1.41 — 4 November 2026
+
+- Warning dialogs for GPS, a cell, a trusted network, and a flood use one layout. The reason is a paragraph. Readings sit under Details, with the label and the value on one line.
+- The update offer has a Release Notes heading. Long notes scroll.
+- When an app on this phone is generating the GPS location, the warning is Possible GPS interference. It says an app on this phone is generating the GPS location, and this phone is using that instead of the satellites.
+- A cell warning keeps what happened in the title. The paragraph says Fieldwatch cannot tell the cause.
+- Bundled language files are written for this version. Release Notes is the line added since 1.1.40.
+
+## 1.1.40 — 3 November 2026
+
+- When this phone is online at start, Fieldwatch asks GitHub whether a newer version is there. A newer one shows the notes, with Update now and Later. Later skips that version until a newer one is published. Settings can check again. Update now downloads the app, and Android still asks you to confirm the install. If GitHub does not answer, the app on this phone stays as it is.
+- On-screen notes are shorter. They say what the control does. The scan status no longer calls the scan passive. Settings notes under the switches are one line. The longer explanation stays in the user guide.
+
+## 1.1.39 — 2 November 2026
+
+- A language file that comes with the app says it was written for this version. An imported file reports the keys added after the version it was written for. A translated line from an older file still shows.
+
+## 1.1.38 — 2 November 2026
+
+- Samsung SmartTags matches the SmartTag name or service FD5A. A phone, TV, Buds, or watch that only sends Samsung's company ID stays off that row. The stock catalog is 98. Opening this version drops that company ID from the built-in row. A rule you added stays. Update stock catalog from GitHub brings the same file.
+- Reports lists radios heard at two or more places in the last 7 days, without a sit and without hearing them now. The map shows where this phone was. Each radio has its own color on the map and beside its name. Privacy mode hides the map and the coordinates.
+- On that report, each stop is numbered. The time, the street, and the coordinate are on their own lines. The numbers are plain. The name is the live list's Name + type. Tap a radio to open it, including one that has left Live.
+- Cell connection monitoring is off until Monitor the cell connection is on. The first still visit at a place only learns. How long to learn starts at 3 days. The choices are None, 1 day, 3 days, 7 days, and 14 days. A later visit can warn on a new cell, or on a drop to 2G or 3G. The dialog can list the country, the operator, the channel, and the band. Debrief gets a section when a warning overlapped the sit. The alert is separate from the watchlist. Diagnostics lists the camp even when the watch is off.
+- Signature and network, under Alerts, saves words that replace the signature in the announcement. Those words apply to every radio of that signature with that network name. The network name is not spoken. A name on one radio still comes first. Saying the class only keeps the words saved and says the class. The list goes with Export settings.
+- Trusted networks shows how long learning has left. How long to learn adds 1 hour. Changing the length does not forget access points already saved.
+- Show live path and Reports → Path have a camera button. It hides the marks in the picture, or shows them again. The choice is saved. Hunt has no button. The list under Path, the sit report, and the printed path still follow the layer switches.
+- The new settings and alert text is in all 26 languages that come with the app.
+
+## 1.1.37 — 29 October 2026
+
+- Show live path and Hunt turn with the heading as it changes. The map already on screen turns with it, so the edges stay filled. Standing still, or turning the phone in place, leaves the map where it is.
+- A double-tap on Show live path or Hunt switches between the close view and the whole path right away.
+- Coming back to the live list draws the list first. The map follows.
+
+## 1.1.36 — 29 October 2026
+
+- Each trusted-network warning names that network and the reason that fired. The title is Possible evil twin of "{name}": {reason}. The reason is one or more of these: open security, weaker security, unknown device, or away from usual places. The line under it is that access point's address. "00:13:37 belongs to Orient Power Home Network." is an extra line, and only when that address starts with 00:13:37. A warning for any other address does not include it. That line does not replace the network name or the reason, and that address block does not warn by itself.
+- Trusted-network warning actions sit on their own lines.
+
+## 1.1.35 — 29 October 2026
+
+- Language packs cover more of the on-screen text: the live sit line, the radar, device explanations, filters, reports, and the human-readable Debrief and Compare wording, including the PDF. The English template lists a character limit for each line. Signature names and catalog notes stay English. CSV, JSON, GPX, KML, and the other machine exports stay as they are.
+- Importing a language pack can save a text report. It names the keys that will be used, the keys that are missing, and each line that is too long, with the length and the limit.
+- GNSS interference, Location and Maps, and TAK / CoT group the on/off switch apart from the choices under it. Each control has a short line about what it does. Warning level replaces Alert from. Warn when the signal holds replaces Spoofing checks. Keep the GPS receiver awake, Count satellites fading together, and Gain reads backwards replace the old receiver switches. Known cameras replaces Layers. Corner readout replaces Position. Display location on map is the title on that group.
+- On Trusted networks, the on/off switch sits on its own. The warning checks are in a Warnings group, each with a short line about what it catches. Learning, and how a warning reaches you, are separate.
+- On TAK / CoT, the GNSS heading is GNSS warnings. The Trusted networks heading on that page is gone. The note sits under Network warnings.
+- On TAK / CoT, the Floods heading is BLE Flood warnings. A Wi-Fi beacon flood still uses that same line. The notes under the TAK controls are shorter, and Trusted networks has one.
+- On TAK / CoT, under Trusted networks, that switch is Network warnings. The hold under it is How long a warning spot stays.
+- The Trusted networks TAK pin, and how long that pin stays, are on Settings → TAK / CoT. Both stay dim until Watch trusted networks is on.
+- The guide says Trusted networks is not a substitute for checking a network yourself. A quiet watch is not a finding that the network is safe.
+- The Display switch on Live is Show map with live path.
+- TAK / CoT to this phone no longer tries to pin its socket. Diagnostics says whether that same-phone feed reaches ATAK. It reaches ATAK when the socket opened on Wi-Fi or Ethernet. On cellular alone it needs Wi-Fi. A socket opened without Wi-Fi or Ethernet is still replaced once either connects.
+- Privacy mode masks raw advertisement bytes on the radio page, in Share as text, and in one-radio AI Export. The row keeps its label and byte count, and the hex shows as masked. Logs and sit export stay complete.
+- A Samsung SmartTag advertisement now says whether it is separated from its owner or with its owner, and a separated tag is followed across address changes.
+- Show live path, Hunt, and Reports → Path draw saved map pictures when the phone has no connection. A place with no saved picture stays a plain line. New pictures are still downloaded only while online.
+- The sit report leaves a camera list out when its layer switch is off. The count and the marks on the printed path stay off. The file stays on the phone. A switch that is on still names a list that is not on the phone.
+- Trusted networks watches a Wi-Fi name you mark on that radio's page. It can alert when a later sighting of that name is weaker, from an unknown maker, or far from the places this phone usually hears it. The list, the learning window, and a TAK pin are under Settings. The pin starts off. The phone does not connect to the network or ask for its password.
+- Show live path and Reports → Path open a card when you tap a known camera. The card names the kind, the company when the list has one, and the facing when one is stored. A number is several of that kind. Tap the mark again to close it. The card has no coordinates.
+- Opening Fieldwatch no longer closes while the path reads a saved camera list. A failed camera download stays on the settings row and says why. A saved copy stays, and the path still opens.
+- Importing a language pack, signatures, settings, trusted networks, or the stock catalog says why it failed. A file that cannot be read, is empty, is too large, or cannot be saved leaves what is already on the phone.
+- A watchlist alert on Live opens in the list under Show live path. By class, the strength list, Timeline, and Hybrid keep that row in the space below the map.
+- Tapping a known camera on the map uses the same card as a detection. The line meets that card. Cameras on the same spot are listed together.
+
+## 1.1.34 — 27 October 2026
+
+- TAK / CoT to this phone pins the loopback socket to lo before it is bound. A socket opened without Wi-Fi or Ethernet is replaced once either connects, including when cellular was already up. A socket opened on that LAN keeps sending after the LAN drops. Diagnostics lists whether TAK is on, the destination kind and port, whether the loopback socket is bound to lo, what was connected when it opened, and whether the last send succeeded. The host address stays off that page.
+
+## 1.1.33 — 27 October 2026
+
+- TAK / CoT to this phone still reaches ATAK when Fieldwatch starts with no Wi-Fi joined. A socket opened with no network is replaced once a network is there. A socket that already worked keeps sending after Wi-Fi drops.
+
+## 1.1.32 — 26 October 2026
+
+- Show live path draws alert dots and known cameras on top of the drive line.
+- Hunt draws the walk before GPS locks. The line on that picture is No GPS yet. This walk is not on a map. Streets and the place in the corner stay off. Two fresh fixes place that walk when it is still about the first 20 m. A longer walk stays off the map.
+- Reports → Path draws cameras and detections on top of the drive line. Zooming in splits a numbered group into separate spots, unless those spots are the same place.
+- A real stop stays green. GPS jitter no longer flips that stretch back to blue.
+- Show live path keeps the drive line on the map when the view is zoomed in.
+- Zooming Reports → Path keeps the drive line inside the map.
+- Reports → Path can be pinched and dragged. A double-tap fits the whole path again.
+- A known camera speaks when it is still about 500 m ahead. The path report still counts cameras within about 150 m.
+- The drive line is a slightly darker blue. A green stop is the same width as that blue line.
+- Voice Alerts calls the red-light switch Alert for red light cameras.
+- Hunt shows the latest GPS fix as soon as it opens. The circle is the size of that fix. The heat trail starts after two fresh fixes agree, and steps taken before that are left off. In the first 20 m, one tight fix that disagrees moves the dot onto that fix. A phone whose step sensor is missing, or never reports a step, counts steps from the walking motion. A compass jump does not move the walk unless the phone itself is turning.
+- The sit report lists known cameras the same way as Reports → Path. The heading is Known cameras on path. Each type is the name, then how many faced the path and how many were on the path with no direction. A missing list is still named.
+- Cameras on a sit path are drawn larger, with a light ring, so they stay visible on the blue path. Show live path and Hunt keep the smaller marks.
+- Reports → Path leaves Known cameras on path off when that list is not on the phone, or when its layer switch is off. A list that is on still shows its rows. The debrief still counts a saved list.
+- Reports → Path lists known cameras as one row for each type, with the same colors as the map. The line under the heading is the distance. The debrief keeps the full sentences.
+- Reports → Path lists known cameras on the path under the radios that alerted. The lines match the sit report.
+- Cameras sit on top of the path line. That is Reports → Path, the printed path, and Show live path.
+- The printed path in a Debrief PDF and in Compare is the same blue as the path on the phone. A real stop is still green. The second sit stays slate. Reports → Path and that printed path show the cameras the sit report counts. A stored direction counts when it pointed toward the path. No stored direction counts as on the path. Gunshot detectors and a direction that pointed away are left out. Show live path and Hunt still draw the layer that is switched on.
+- The sit report counts cameras along the path. A stored direction counts when it pointed toward the path. No stored direction counts as on the path. Flock, other plate readers, speed cameras, red lights, and other cameras are listed. Gunshot detectors are left out. The count uses the lists saved on this phone.
+- Reports → Path leaves the corner line off a sit that has ended. That line is the grid, or masked while Privacy mode is on. An open sit still shows where this phone is.
+- Show live path draws the drive as a thicker blue line. A real stop is still green.
+- Zooming out on Show live path or Hunt shows one map picture for each spot. A closer picture no longer stays on top of the wider one.
+- Scrolling Show live path or Hunt keeps the pictures already on screen and fills the new ground as each picture arrives. The next screen in the direction of that scroll is saved for the next drag.
+- Show live path and Hunt save the next screen of the map along the direction of travel, and a little to the side when the course is turning. Those pictures stay off the screen until you get there.
+- A double-tap on Show live path opens the same scale as a sit that has not moved yet. The short side reaches about 220 m.
+- Hunt places the start on a GPS fix only when that fix is within about 12 m. It asks to count steps, and uses this phone's step sensor once that is allowed. Opening Hunt does not count as a step.
+- Hunt still follows this phone on a handset whose step sensor will not report steps. That handset counts steps from the accelerometer.
+- The pink pin is off the hunt map.
+- Hunt map colors grade from one place into the next again. A loud pass still outweighs a much weaker one.
+- A nearly gone hunt signal stays blue. The color moves gradually through the shades toward red as you get closer, and red shows by about −50 dBm. The place you are standing keeps the loudest reading heard there.
+- Hunt keeps following this phone after the radio goes out of range. No color is added on that part of the walk, because there is no reading to paint.
+- Hunt follows steps and the phone heading. GPS places that walk on the map and only nudges it when a good fix agrees. The circle on the dot grows as the walk gets longer. Hold the phone flat. A tilted phone pauses the steps. The place you are standing keeps the loudest reading heard there. The next place, about a step and a half on, gets the strength heard there, weaker included. The color grades evenly from one place into the next.
+- Dragging or pinching Show live path or Hunt keeps the direction already chosen. Direction of travel stays up. It no longer snaps to north up.
+- Show live path and Hunt fill the corners of the map when it turns with travel.
+- Location and Maps keeps saved map pictures on the phone, up to 512 MB, and can clear them. Clear saved maps does not remove plate readers or other sensors.
+- Location and Maps adds USGS Imagery Topo and FAA VFR Sectional. The USGS maps and FAA VFR Sectional cover the United States and do not ask for a key. FAA VFR Sectional says it is not for navigation. A view that is too far out for that chart asks you to zoom in. Under Map, Overlays can put USGS Shaded Relief and USGS Hydrography on top of the map you picked. Both cover the United States. Leave them off for the map alone. With an overlay on, the map credit and each overlay credit are separate lines on the right, so the grid on the left stays readable. With overlays off, the map credit stays one short line.
+- Location and Maps adds two Layers. License plate reader cameras downloads the United States plate-reader list (about 37 MB). Other sensors downloads the speed camera, red light, gunshot detector, and other camera list, about 1 MB. The map pictures stay the same. Neither list is included with the app. Each has its own Update. Marks show on Show live path, Hunt, and Reports → Path. Flock plate readers are blue. Other plate readers are amber. Speed cameras are teal, red lights are red, gunshot detectors are purple dots, and other cameras are a smaller gray mark. A crowd of one type keeps that color. Each type has its own voice alert, off until turned on. Turning one on speaks that notice. A switch does not hide marks. A plate-reader alert names the company when the file has one.
+- After that list finishes downloading, the row says Processing while the phone reads the file. A sensor with a known direction is a view cone. It stays small when the map is far out and grows when you zoom in. No direction, and every gunshot detector, is a dot. A saved copy that has only Flock cameras asks before Update, even when the downloaded list has not changed.
+- On Location and Maps, the paragraph above Map has the same space before the box that Position already has.
+- Bitchat is a Mesh signature. It matches the BLE service advertisement. It does not beep. Settings → Update stock catalog from GitHub adds it. Catalog 97.
+
+## 1.1.31 — 23 October 2026
+
+- The Wi-Fi, Bluetooth, and signature counts in the top bar each keep room for 888, so the line does not shift as the numbers change.
+- Hunt no longer shows Very Close, Faint, or Gone. Watch the number, the sparkline, and the cloud. Beep and Vibrate still stay quiet when there is no packet, or the radio has left.
+- Settings → Location and Maps can use world maps from Esri, MapTiler, Stadia, and Thunderforest. Those maps are marked Key. Paste the key from your own account. It stays on this phone, and Export settings leaves it out. OpenStreetMap and the USGS maps do not ask for a key. A bad key or a map that does not load shows a popup.
+- A double-tap on Show live path switches between the whole path and a close view around this phone. The close view keeps this phone in the center, and the short side reaches a little past about 100 m. North up and direction of travel each keep that zoom.
+- The drive line keeps a point every few meters, so it follows the street around a corner. A turn leaves the road already driven where it was. Green is still a real stop.
+- Show live path and Hunt have a compass button where the N mark was. Tap it to switch between north up and direction of travel. The picture shows all four combinations. Zoomed out is a bent path, with N above it when north is up. Direction of travel puts the same compass letters as the close view above a smaller bent path. Zoomed in is those letters, or N above an arrow when north is up. Standing still keeps the last direction. A turn in place does not turn the map. Reports → Path and the saved path figure stay north-up.
+- Show live path follows the road through a turn. A straight stretch still leaves GPS wobble off the line. Green is a real stop: this phone stayed within about 25 m for about 40 seconds. The rest of the drive is the plain line.
+- Hunt leaves the top of the page for the map. Watch the number, the sparkline, and the cloud. The scale starts at Weak. The words beside the number follow the language pack.
+- Hunt draws a heat cloud of where this phone heard that radio. The color runs from blue where it is weak, through cyan, green, yellow, and orange, to red where it is powerful. Walk or drive the area. The brightest patch is where it was loudest. The loudest mark sits in that patch. It is not a distance and not a pin on the other radio.
+- Hunt opens close in, and the cloud is drawn finer. Steps fill in short moves between GPS fixes. A tight GPS fix still recenters the walk.
+- The hunt cloud follows the walk. Hears connect, and the color changes smoothly from one to the next. Close parts of the walk fill in between the lines. A far gap stays open. The edge fades that color out.
+- Hunt stays close on you as the walk gets longer. Leaving the page keeps the cloud until Reset, or until you hunt a different radio. A turn in place does not move the dot. The lower-left reading matches the dot. While GPS is moving, steps follow that direction. The top of the phone is used when GPS is stuck.
+- Settings → Maps chooses the map under Show live path, Reports → Path, and the path figure. OpenStreetMap is the start. USGS Imagery and USGS Topo cover the United States. A small line in the corner of the map names the source.
+- The radio page shows the grid beside the GPS. For an ordinary radio that is where this phone was. A Remote ID aircraft shows the aircraft position and the takeoff, pilot, or fixed point, each with a grid, plus the distance and bearing from this phone. A sit report uses where this phone was when that position was heard and names the time. An older sit shows the grid and leaves the distance and bearing off. Privacy mode masks the grid and leaves the distance and bearing off.
+- Settings → Maps can show where this phone is now on the lower left of the map, as GPS or as a grid. Off leaves that corner empty. Privacy mode masks it. The corner stays put until this phone has moved.
+
+## 1.1.30 — 22 October 2026
+
+- Places no longer closes the app on Android 10 and 11.
+
+## 1.1.29 — 22 October 2026
+
+- On Radar, Display dims Title line, Subtitle line, Show live path, RSSI bars, Frequency, and First / last seen. Timeline dims RSSI bars. The saved choice stays, and it comes back on a view that uses it. View, Sort, Brief hold, and Signature names stay available.
+- While Location is off, Fieldwatch does not ask for Wi-Fi or Bluetooth scans. Turning Location on waits a moment, then starts them again.
+- If Fieldwatch closes from a crash, the next open shows what happened before anything else starts. Copy sends it. Continue opens the app. A normal close does not show it.
+
+## 1.1.28 — 22 October 2026
+
+- Show live path is on Display, the first switch, above RSSI bars. It starts off. Turn it on and a north-up map of this phone sits across the top of Live, with the list still under it. Drag the bar between the map and the list. While View is Radar the switch stays dimmed and does not turn off.
+- The line starts where you are when the map opens and draws as soon as you move. A bend is kept when the drive leaves the last line by about 12 meters. Side-to-side GPS wobble stays off the line. With no sit, the line is the later of when you turned the switch on and 15 minutes ago. An open sit draws from the start of the sit, walking or driving. Dots are watchlist alerts. Pinch or drag holds the view. Recenter, or a double-tap, follows you again.
+- Reports → Path uses that same line.
+- Turning Location on while Fieldwatch is open pauses Wi-Fi and Bluetooth for a moment, then starts them again. A bad scan result is skipped instead of closing the app.
+- Debrief and Compare path figures draw the street tiles solid. The disclaimer and the path caption use the body text.
+
+## 1.1.27 — 16 October 2026
+
+- Places remembers a stable tracker this phone hears at two or more places in the last 7 days, and a return after a quiet stretch. The lines are on that radio’s page and in the sit report, with where this phone was. A stop from another day includes the date. Online place names adds the street. Filters can limit Live to the ones you can hear now. A radio that changes its address is skipped. Ordinary Wi-Fi and Bluetooth stay off. There is no beep and no TAK marker. Each radio keeps the latest 8 stops. A ninth confirmed stop drops the oldest.
+- The user manual explains Places: what a stop is, which radios qualify, and the limits.
+- Signature candidates shows a progress dialog while it reads the log and matches the catalog. The bar follows the file.
+- Sit export can write GeoJSON. It is the same map as the sit GPX and KML: this phone's path, and a point where this phone heard each radio.
+- Settings opens as a list of topics. Tap a row for that page. The row shows the current choice. Back returns to the list. Named radios is its own row, after Watchlist. The row shows how many are saved.
+
+- A Filters row names what is selected in the same muted text as Settings. That line is not green.
+- The sit list is spaced a little tighter.
+- The Signatures page says Bookmark to alert. The line about hiding a family on Filters is gone.
+- The Sits line says Radios heard during a named stretch of time. Under Start sit it says Select Sit for actions below.
+- Moving with you says Loud Bluetooth radios that stay with you.
+- Presets says tap a preset to load it, long-press one to delete it, or save the current filters settings to a new preset.
+- Selected signature classes says to pick Show only or Hide these, then the classes, and that a preset includes those selections.
+- Selected signatures says to pick Show only or Hide these, then the signatures, and that a preset includes those selections.
+- Edit signature drops the last sentence under Notes and the last sentence under Extra attention.
+- Edit signature says the class is what Filters uses for Show only or Hide these.
+- Edit signature and Decode fields use shorter, accurate lines for Min peers, color, rules, restore defaults, removing a decode map, and an empty preview.
+- Settings → Diagnostics says it shows whether scanning is running, and the state of Wi-Fi, Bluetooth, Location, and GPS. The Diagnostics page no longer tells you to paste the copy into an issue.
+- The Settings footer no longer says Wi-Fi and Bluetooth only.
+- The Live tour points at the sliders in the top right. Open it shows how Live looks. Skip closes the tour. An upgrade to this version shows that card once, on the first Live screen. Settings → Show Live tour still brings it back.
+- The language list uses the English name of each language, in alphabetical order. Use the phone's locale if available stays first.
+- The user manual explains Language: the bundled drafts were translated with AI, a wrong line belongs in a GitHub issue, and a new language is a file in the author’s own repository. The author guide is linked from that section.
+- An off switch keeps a light knob, so it still looks like it can be turned on. A switch that cannot be used stays faded.
+- Reports keeps Sits open. Path, Debrief, Sit export, Compare, Log Export, and Signature candidates each open their own page. The line under each row is a short description. Signature candidates explains the search, and Find candidates starts it. Path, Debrief, Sit export, and Compare sit under a line that names the sit they use, with a bar on the left in the same green as those rows. Log and Signature candidates stay full width under that group.
+- Keep or hide calls the three keep switches Keep signature matches only, Keep watched only, and Keep named only. Hide my radios is Hide Mine.
+- Filters keeps Presets and Radios open at the top. Moving with you, Seen at more than one place, and New detections are switches on that list. Keep or hide, Selected signature classes, Selected signatures, and Signal, name, MAC, vendor open their own page. The row names what is selected in that section.
+- Selected signatures is one list. Show only and Hide these sit above it, the same way Selected signature classes works. Turning a chip off keeps the picks.
+- Sit export can write an ATAK data package. ATAK imports the zip. It has this phone's path, a point for each radio, an aircraft pin and its short track when a position was advertised, an operator pin when that position was advertised, and a GNSS hit as a pin on the path. The ellipse and floods stay on the live feed.
+- Each phone gets its own TAK marker. The name is Fieldwatch plus a 4-character tag, unless you type one. Two phones on one network no longer share that marker. A Remote ID aircraft with a UAS ID is still one shared marker. This is not direction finding.
+- Settings → GNSS interference can record the phone’s raw GPS measurements around a hit. The switch is off until you turn it on. Share last recording is on that page. Privacy mode does not record.
+
+## 1.1.26 — 12 October 2026
+
+- A Remote ID operator location says what that point is. Takeoff is the launch spot. Pilot is a live GPS operator. Fixed is a point the aircraft declared. An older sit says Operator. The pin stays Orange. A known operator altitude is shown. Unknown stays blank. The card can say the aircraft height is above takeoff or above the ground. EU category and class show only when the plate says the classification is EU.
+- Settings calls the longer GNSS mark an ellipse. A short hit is still a pin. A longer hit is one ellipse from the start to the last place, half as wide as it is long.
+- The user manual, under GNSS interference, explains how a hit is decided.
+
+## 1.1.25 — 11 October 2026
+
+- A GNSS hit can put a mark on the ATAK map where this phone was. A short hit is a pin. If the phone keeps moving while the hit lasts, the mark becomes an oval from where it started to where it was last heard, half as wide as it is long. The words also stay on this phone's Fieldwatch marker. The mark does not say where the cause is.
+- How long that mark stays is a setting: 1 hour, 6 hours, 24 hours, or until deleted. The default is 1 hour. Until deleted stays until GNSS on TAK is turned off.
+- A radio spot on TAK keeps its name after the radio leaves. How long a spot stays is 1 hour, 6 hours, 24 hours, or until deleted. The default is 1 hour. This phone's Fieldwatch marker still refreshes about every 2 minutes. Turning the feed off, or Privacy mode on, takes those radio spots off the map. A short GNSS pin that grows into an oval does not leave a Fieldwatch spot behind.
+
 ## 1.1.24 — 10 October 2026
 
 - The icons in the top bar show whether Wi-Fi, Bluetooth, and signatures are healthy. Green means that part is working, including the wait between Wi-Fi scans and a planned Bluetooth rest. A signature count of 0 stays green. Gray means the scan is stopped. Dim gray means that radio is off. Red means Location is off while that scan is running, or Android is refusing it. The words after the icons stay in the secondary text color. Night mode folds the colors into the red display.

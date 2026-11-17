@@ -13,11 +13,9 @@ import kotlin.math.min
 object Sit {
     const val NAME_MAX = 40
     const val RADIO_CAP = 6000
-    const val PATH_CAP = 2000
+    const val PATH_CAP = 16_000
     const val CLOSED_CAP = 10
     const val TRAIL_CAP = 40
-    const val PATH_MIN_M = 10.0
-    const val PATH_MIN_MS = 5_000L
     const val FLUSH_MS = 10_000L
     const val FORMAT = "fieldwatch-sit"
     const val FORMAT_VERSION = 1
@@ -36,9 +34,9 @@ object Sit {
         val h = s / 3600L
         val m = (s % 3600L) / 60L
         return when {
-            h > 0L -> "$h h $m min"
-            m > 0L -> "$m min"
-            else -> "$s s"
+            h > 0L -> LanguageText.text("sit.hm", mapOf("h" to "$h", "m" to "$m"))
+            m > 0L -> LanguageText.text("sit.m", mapOf("m" to "$m"))
+            else -> LanguageText.text("sit.s", mapOf("s" to "$s"))
         }
     }
 
@@ -48,7 +46,10 @@ object Sit {
     fun dropWarning(closed: List<SitSummary>): String? {
         if (closed.size < CLOSED_CAP) return null
         val oldest = closed.lastOrNull() ?: return null
-        return "You already have $CLOSED_CAP saved sits. When you end this one, the oldest (“${oldest.name}”) will be deleted."
+        return LanguageText.text(
+            "sit.drop",
+            mapOf("n" to CLOSED_CAP.toString(), "name" to oldest.name),
+        )
     }
 
     fun pinned(
@@ -122,12 +123,45 @@ data class SitRadio(
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val payloadOpLon: Double? = null,
+    /** 0 takeoff, 1 live GPS, 2 fixed. Null on a sit saved before the type was stored. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadOpKind: Int? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadOpAlt: Double? = null,
+    /** ASTM Auth kept for a saved radio page. Null on a sit saved before this field. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadAuth: RemoteIdAuth? = null,
     @OptIn(ExperimentalSerializationApi::class)
     @EncodeDefault(EncodeDefault.Mode.NEVER)
     val payloadTrail: List<PayloadFix> = emptyList(),
     val gpsTrail: List<GpsSample> = emptyList(),
     /** Live-row labels captured at hear-time. Saved sits do not keep the advertisement bytes. */
     val liveDecode: List<LiveDecodeChip> = emptyList(),
+    /** Separated SmartTag privacy ID. Kept only as long as this sit keeps the radio. Not a device key. */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val smartTagId: String? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadAt: Long? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadPhoneLat: Double? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadPhoneLon: Double? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadOpAt: Long? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadOpPhoneLat: Double? = null,
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val payloadOpPhoneLon: Double? = null,
 ) {
     fun toSighting(): Sighting = Sighting(
         key = key,
@@ -164,8 +198,18 @@ data class SitRadio(
         payloadSpeed = payloadSpeed,
         payloadOpLat = payloadOpLat,
         payloadOpLon = payloadOpLon,
+        payloadOpKind = payloadOpKind,
+        payloadOpAlt = payloadOpAlt,
+        payloadAuth = payloadAuth,
         payloadTrail = payloadTrail,
         liveDecode = liveDecode,
+        smartTagId = smartTagId,
+        payloadAt = payloadAt,
+        payloadPhoneLat = payloadPhoneLat,
+        payloadPhoneLon = payloadPhoneLon,
+        payloadOpAt = payloadOpAt,
+        payloadOpPhoneLat = payloadOpPhoneLat,
+        payloadOpPhoneLon = payloadOpPhoneLon,
     )
 
     companion object {
@@ -196,9 +240,19 @@ data class SitRadio(
             payloadSpeed = device.payloadSpeed,
             payloadOpLat = device.payloadOpLat,
             payloadOpLon = device.payloadOpLon,
+            payloadOpKind = device.payloadOpKind,
+            payloadOpAlt = device.payloadOpAlt,
+            payloadAuth = device.payloadAuth,
             payloadTrail = AircraftTrail.append(emptyList(), device),
             gpsTrail = trailSample(device),
             liveDecode = device.liveDecode,
+            smartTagId = SmartTag.separatedId(device),
+            payloadAt = device.payloadAt,
+            payloadPhoneLat = device.payloadPhoneLat,
+            payloadPhoneLon = device.payloadPhoneLon,
+            payloadOpAt = device.payloadOpAt,
+            payloadOpPhoneLat = device.payloadOpPhoneLat,
+            payloadOpPhoneLon = device.payloadOpPhoneLon,
         )
 
         fun trailSample(device: Sighting): List<GpsSample> {
@@ -224,6 +278,21 @@ data class SitFile(
     val operatorPath: List<GpsSample> = emptyList(),
     val floods: List<FloodBurst> = emptyList(),
     val gnss: List<GnssMark> = emptyList(),
+    val cells: List<CellMark> = emptyList(),
+    /**
+     * Cameras the path came near. Empty when none did, or when this file
+     * was saved before that list was kept. [cameraKept] says which.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val pathCameras: List<FlockCamera> = emptyList(),
+    /**
+     * Last frozen step whose cameras are in [pathCameras].
+     * Null means this sit never saved that list, so the report counts once from the files.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val cameraKept: GpsSample? = null,
 )
 
 data class SitUi(
@@ -237,6 +306,15 @@ data class SitUi(
     val notice: String? = null,
 )
 
+/** Open sit, for the live map. Radios are already limited to watchlist alerts heard since [startAt]. */
+data class OpenLivePath(
+    val startAt: Long,
+    val samples: List<GpsSample>,
+    val radios: List<Sighting>,
+    /** Cameras this sit already saved along the path. Empty until the first fold. */
+    val cameras: List<FlockCamera> = emptyList(),
+)
+
 data class SitDebrief(
     val name: String,
     val startAt: Long,
@@ -245,6 +323,20 @@ data class SitDebrief(
     val operatorPath: List<GpsSample>,
     val floods: List<FloodBurst> = emptyList(),
     val gnss: List<GnssMark> = emptyList(),
+    val cells: List<CellMark> = emptyList(),
+    /**
+     * Cameras saved on this sit. Null when the sit has not saved that list yet,
+     * including a sit written before it was kept. Empty means the path was checked
+     * and no listed camera was along it.
+     */
+    val pathCameras: List<FlockCamera>? = null,
+)
+
+/** Path tail still to fold, and the cameras already frozen on that sit. */
+data class CameraSlice(
+    val anchor: GpsSample?,
+    val points: List<GpsSample>,
+    val committed: List<FlockCamera>,
 )
 
 data class DebriefWindow(
@@ -261,6 +353,9 @@ class SitSession(
     path: List<GpsSample> = emptyList(),
     floods: List<FloodBurst> = emptyList(),
     gnss: List<GnssMark> = emptyList(),
+    cells: List<CellMark> = emptyList(),
+    pathCameras: List<FlockCamera> = emptyList(),
+    cameraKept: GpsSample? = null,
 ) {
     var summary: SitSummary = summary
         private set
@@ -268,18 +363,127 @@ class SitSession(
         radios.forEach { put(it.key, it) }
     }
     private val path = ArrayList<GpsSample>(path.size + 16).apply { addAll(path) }
+    private val pathApex = Geo.DriveApex()
+    /** Path length already checked for [onePlaceLabel]. A drive does not measure every pair again. */
+    private var placeChecked = 0
+    private var placeWide = false
+    /** Cameras on frozen steps. The report also shows whatever is beside the current tip. */
+    private val cameraCommitted = LinkedHashMap<Long, FlockCamera>()
+    private var cameraShow: List<FlockCamera> = emptyList()
+    private var cameraKept: GpsSample? = cameraKept
     private val floods = ArrayList<FloodBurst>(floods.size + 4).apply { addAll(floods) }
     private val gnss = ArrayList<GnssMark>(gnss.size + 4).apply { addAll(gnss) }
+    private val cells = ArrayList<CellMark>(cells.size + 4).apply { addAll(cells) }
     var dirty: Boolean = false
         private set
+    private var pathSnap: List<GpsSample> = emptyList()
+    private var pathSnapN = -1
+    private var pathSnapHeadAt = Long.MIN_VALUE
+    private var pathSnapHeadLat = Double.NaN
+    private var pathSnapHeadLon = Double.NaN
+    private var pathSnapTipAt = Long.MIN_VALUE
+    private var pathSnapTipLat = Double.NaN
+    private var pathSnapTipLon = Double.NaN
+    /** Bumps when an alert dot would move or appear. A louder hear does not. */
+    private var alertGen = 0
+    private var alertSnap: List<Sighting> = emptyList()
+    private var alertSnapGen = -1
+    private var alertSnapSince = Long.MIN_VALUE
+    private var alertSnapKeys: Set<String> = emptySet()
+    private var alertSnapFleets: Set<String> = emptySet()
+    private var alertSnapHidden: Set<String> = emptySet()
 
     val open: Boolean get() = summary.open
     val radioCount: Int get() = radios.size
     val atCap: Boolean get() = radios.size >= Sit.RADIO_CAP
-    val operatorPath: List<GpsSample> get() = path.toList()
+    val operatorPath: List<GpsSample>
+        get() {
+            val n = path.size
+            val head = if (n > 0) path[0] else null
+            val tip = if (n > 0) path[n - 1] else null
+            if (n == pathSnapN &&
+                samePathEnd(head, pathSnapHeadAt, pathSnapHeadLat, pathSnapHeadLon) &&
+                samePathEnd(tip, pathSnapTipAt, pathSnapTipLat, pathSnapTipLon)
+            ) {
+                return pathSnap
+            }
+            val copy = path.toList()
+            pathSnap = copy
+            pathSnapN = n
+            pathSnapHeadAt = head?.at ?: Long.MIN_VALUE
+            pathSnapHeadLat = head?.lat ?: Double.NaN
+            pathSnapHeadLon = head?.lon ?: Double.NaN
+            pathSnapTipAt = tip?.at ?: Long.MIN_VALUE
+            pathSnapTipLat = tip?.lat ?: Double.NaN
+            pathSnapTipLon = tip?.lon ?: Double.NaN
+            return copy
+        }
+    val pathCount: Int get() = path.size
+
+    init {
+        // The file stores the list the report was showing, tip included.
+        // After a restart those tip cameras stay on the sit.
+        if (cameraKept != null) {
+            for (cam in pathCameras) {
+                if (cam.kind == SensorKind.GUNSHOT) continue
+                cameraCommitted[cam.key] = cam
+            }
+            cameraShow = cameraCommitted.values.sortedBy { it.key }
+        }
+    }
+
+    /**
+     * Sit name while the path is still one place, about [meters] across.
+     * Null once some pair is at least that far. Adding points does not measure the drive again.
+     */
+    fun onePlaceLabel(meters: Double): String? {
+        val name = summary.name.trim().ifBlank { null }
+        if (placeWide) return null
+        val count = path.size
+        if (count < 2) return name
+        if (count == placeChecked) return name
+        placeWide = if (placeChecked == 0 || count < placeChecked) {
+            Geo.widerThan(path, meters)
+        } else {
+            Geo.widerThanNew(path, placeChecked, meters)
+        }
+        placeChecked = count
+        return if (placeWide) null else name
+    }
 
     fun markClean() {
         dirty = false
+    }
+
+    /** Watchlist alerts whose last hear is at or after [since]. Hidden keys stay off. */
+    fun alertsSince(
+        since: Long,
+        alertKeys: Set<String>,
+        watchedFleetIds: Set<String>,
+        hiddenKeys: Set<String>,
+    ): List<Sighting> {
+        if (alertGen == alertSnapGen &&
+            since == alertSnapSince &&
+            alertKeys == alertSnapKeys &&
+            watchedFleetIds == alertSnapFleets &&
+            hiddenKeys == alertSnapHidden
+        ) {
+            return alertSnap
+        }
+        val out = ArrayList<Sighting>()
+        for (radio in radios.values) {
+            if (radio.key in hiddenKeys) continue
+            if (radio.lastSeen < since) continue
+            if (radio.key !in alertKeys && radio.fleetIds.none { it in watchedFleetIds }) continue
+            out += radio.toSighting()
+        }
+        alertSnap = out
+        alertSnapGen = alertGen
+        alertSnapSince = since
+        alertSnapKeys = alertKeys
+        alertSnapFleets = watchedFleetIds
+        alertSnapHidden = hiddenKeys
+        return out
     }
 
     fun snapshot(fleets: List<Fleet> = emptyList()): SitFile {
@@ -295,7 +499,62 @@ class SitSession(
             operatorPath = path.toList(),
             floods = floods.toList(),
             gnss = gnss.toList(),
+            cells = cells.toList(),
+            pathCameras = if (cameraKept != null) cameraShow else emptyList(),
+            cameraKept = cameraKept,
         )
+    }
+
+    /** The part of the path whose cameras are not frozen yet. Null when there is no path. */
+    fun cameraSlice(): CameraSlice? {
+        if (path.isEmpty()) return null
+        val committed = cameraCommitted.values.toList()
+        val anchor = cameraKept
+        if (anchor == null) return CameraSlice(null, path.toList(), committed)
+        val idx = path.indexOfLast { it.at == anchor.at && it.lat == anchor.lat && it.lon == anchor.lon }
+        if (idx < 0) {
+            val head = path.first()
+            return CameraSlice(head, path.toList(), committed)
+        }
+        return CameraSlice(anchor, ArrayList(path.subList(idx, path.size)), committed)
+    }
+
+    /** Cameras the report is showing for this path. Empty until a fold has run. */
+    fun camerasAlongPath(): List<FlockCamera> = cameraShow
+
+    /** Store a fold. The report reads [PathCameras.Fold.cameras] and does not search again. */
+    fun applyCameraFold(fold: PathCameras.Fold) {
+        val nextShow = fold.cameras
+        val changed = cameraKept != fold.kept || cameraShow != nextShow
+        cameraKept = fold.kept
+        cameraCommitted.clear()
+        for (cam in fold.committed) cameraCommitted[cam.key] = cam
+        cameraShow = nextShow
+        if (changed) dirty = true
+    }
+
+    /** Copy cell episodes that overlap this sit. The same start and kind update in place. */
+    fun noteCell(incoming: List<CellMark>) {
+        if (!open || incoming.isEmpty()) return
+        val start = summary.startAt
+        var changed = false
+        for (mark in incoming) {
+            if (mark.endedAt > 0L && mark.endedAt < start) continue
+            val index = cells.indexOfFirst { it.at == mark.at && it.kind == mark.kind }
+            if (index < 0) {
+                cells += mark
+                changed = true
+            } else if (cells[index] != mark) {
+                cells[index] = mark
+                changed = true
+            }
+        }
+        if (cells.size > 40) {
+            val drop = cells.size - 40
+            repeat(drop) { cells.removeAt(0) }
+            changed = true
+        }
+        if (changed) dirty = true
     }
 
     /** Copy GNSS hits that started during this sit. The same start time updates in place. */
@@ -346,6 +605,8 @@ class SitSession(
         if (changed) dirty = true
     }
 
+    fun radio(key: String): SitRadio? = radios[key]
+
     fun sightings(): List<Sighting> = radios.values.map { it.toSighting() }
 
     fun rename(raw: String): Boolean {
@@ -373,7 +634,9 @@ class SitSession(
         if (!open) return false
         val existing = radios[device.key]
         if (existing != null) {
-            radios[device.key] = merge(existing, device, fleets)
+            val merged = merge(existing, device, fleets)
+            radios[device.key] = merged
+            if (alertPlaceMoved(existing, merged)) alertGen++
             dirty = true
             return true
         }
@@ -384,6 +647,7 @@ class SitSession(
             if (radios.size >= Sit.RADIO_CAP || tight) return false
         }
         radios[device.key] = SitRadio.from(device, fleets)
+        alertGen++
         dirty = true
         evict(fleets, watchDeviceKeys, watchedFleetIds)
         return true
@@ -404,20 +668,11 @@ class SitSession(
     fun recordPath(lat: Double, lon: Double, at: Long): Boolean {
         if (!open) return false
         val last = path.lastOrNull()
-        if (last != null) {
-            if (!Geo.hopPlausible(last, lat, lon, at)) return false
-            val d = Geo.meters(last.lat, last.lon, lat, lon)
-            val dt = at - last.at
-            if (d < Sit.PATH_MIN_M && dt < Sit.PATH_MIN_MS) {
-                path[path.lastIndex] = GpsSample(at, lat, lon)
-                dirty = true
-                return true
-            }
-        }
-        path += GpsSample(at, lat, lon)
-        if (path.size > Sit.PATH_CAP) {
-            val drop = path.size - Sit.PATH_CAP
-            repeat(drop) { path.removeAt(0) }
+        if (last != null && !Geo.hopPlausible(last, lat, lon, at)) return false
+        val trimmed = Geo.extendDrivePath(path, pathApex, lat, lon, at, cap = Sit.PATH_CAP)
+        if (trimmed) {
+            placeChecked = 0
+            placeWide = false
         }
         dirty = true
         return true
@@ -456,6 +711,7 @@ class SitSession(
         watchedFleetIds: Set<String>,
     ) {
         if (radios.size <= Sit.RADIO_CAP) return
+        val before = radios.size
         fun drop(predicate: (SitRadio) -> Boolean) {
             if (radios.size <= Sit.RADIO_CAP) return
             val victims = radios.values.filter(predicate).sortedBy { it.lastSeen }
@@ -468,6 +724,25 @@ class SitSession(
                 row.fleetIds.isEmpty()
         }
         drop { row -> !pinnedRadio(row, watchDeviceKeys, watchedFleetIds) }
+        if (radios.size != before) alertGen++
+    }
+
+    /** True when this hear would move a dot, add one, or drop one. Strength does not. */
+    private fun alertPlaceMoved(old: SitRadio, merged: SitRadio): Boolean {
+        val since = summary.startAt
+        if ((old.lastSeen >= since) != (merged.lastSeen >= since)) return true
+        if (old.fleetIds != merged.fleetIds) return true
+        if (old.extraAttention != merged.extraAttention) return true
+        if (old.payloadLat != merged.payloadLat || old.payloadLon != merged.payloadLon) return true
+        val a = old.gpsTrail.lastOrNull()
+        val b = merged.gpsTrail.lastOrNull()
+        if (a == null || b == null) return a != null || b != null
+        return a.lat != b.lat || a.lon != b.lon
+    }
+
+    private fun samePathEnd(sample: GpsSample?, at: Long, lat: Double, lon: Double): Boolean {
+        if (sample == null) return at == Long.MIN_VALUE
+        return sample.at == at && sample.lat == lat && sample.lon == lon
     }
 
     private fun merge(old: SitRadio, next: Sighting, fleets: List<Fleet>): SitRadio {
@@ -510,9 +785,19 @@ class SitSession(
             payloadSpeed = next.payloadSpeed ?: old.payloadSpeed,
             payloadOpLat = next.payloadOpLat ?: old.payloadOpLat,
             payloadOpLon = next.payloadOpLon ?: old.payloadOpLon,
+            payloadOpKind = next.payloadOpKind ?: old.payloadOpKind,
+            payloadOpAlt = next.payloadOpAlt ?: old.payloadOpAlt,
+            payloadAuth = next.payloadAuth ?: old.payloadAuth,
             payloadTrail = AircraftTrail.append(old.payloadTrail, next),
             gpsTrail = trail,
             liveDecode = next.liveDecode.ifEmpty { old.liveDecode },
+            smartTagId = SmartTag.separatedId(next),
+            payloadAt = next.payloadAt ?: old.payloadAt,
+            payloadPhoneLat = if (next.payloadAt != null) next.payloadPhoneLat else old.payloadPhoneLat,
+            payloadPhoneLon = if (next.payloadAt != null) next.payloadPhoneLon else old.payloadPhoneLon,
+            payloadOpAt = next.payloadOpAt ?: old.payloadOpAt,
+            payloadOpPhoneLat = if (next.payloadOpAt != null) next.payloadOpPhoneLat else old.payloadOpPhoneLat,
+            payloadOpPhoneLon = if (next.payloadOpAt != null) next.payloadOpPhoneLon else old.payloadOpPhoneLon,
         )
     }
 

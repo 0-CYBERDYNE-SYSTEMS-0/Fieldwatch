@@ -7,6 +7,68 @@ import org.junit.Test
 
 class SettingsExchangeTest {
     @Test
+    fun unknownClassAsksForANewerApp() {
+        val pack = SettingsExchange.pack(
+            settings = AppSettings(),
+            filter = FilterState(),
+            presets = emptyList(),
+            watchlist = emptyList(),
+            hiddenPresetIds = emptySet(),
+            appVersion = "1.1.42",
+            exportedAt = "2026-11-08T00:00:00Z",
+        )
+        val encoded = SettingsExchange.encode(pack)
+        val json = encoded.replace("\"classes\": []", "\"classes\": [\"NOT_A_CLASS\"]")
+        try {
+            SettingsExchange.parse(json)
+            throw AssertionError("expected a newer-app refusal")
+        } catch (e: CatalogNeedsNewerApp) {
+            assertEquals("NOT_A_CLASS", e.token)
+        }
+        val newer = encoded.replace("\"formatVersion\": 1", "\"formatVersion\": 2")
+        try {
+            SettingsExchange.parse(newer)
+            throw AssertionError("expected a newer format to wait for an app update")
+        } catch (e: CatalogNeedsNewerApp) {
+            assertEquals("formatVersion 2", e.token)
+        }
+    }
+
+    @Test
+    fun upgradeShowsTheLiveTourOnce() {
+        val saved = AppSettings(liveTourDone = true)
+        val offered = saved.offerLiveTourOnce()
+        assertFalse(offered.liveTourDone)
+        assertEquals(LIVE_TOUR_REV, offered.liveTourRev)
+        val dismissed = offered.copy(liveTourDone = true)
+        assertEquals(dismissed, dismissed.offerLiveTourOnce())
+    }
+
+    @Test
+    fun importKeepsThisPhonesLiveTour() {
+        val local = localConfig(
+            settings = AppSettings(
+                liveTourDone = true,
+                liveTourRev = LIVE_TOUR_REV,
+                disclaimerAccepted = true,
+                disclaimerRev = DISCLAIMER_REV,
+            ),
+        )
+        val pack = SettingsExchange.pack(
+            settings = AppSettings(liveTourDone = false, liveTourRev = 0),
+            filter = FilterState(),
+            presets = stockPresets,
+            watchlist = emptyList(),
+            hiddenPresetIds = emptySet(),
+            appVersion = "1.1.27",
+            exportedAt = "2026-10-20T00:00:00Z",
+        )
+        val (next, _) = SettingsExchange.apply(local, pack)
+        assertTrue(next.settings.liveTourDone)
+        assertEquals(LIVE_TOUR_REV, next.settings.liveTourRev)
+    }
+
+    @Test
     fun factorySettingsVoiceAndJump() {
         val stock = AppSettings()
         assertTrue(stock.alertVoice)
@@ -18,6 +80,8 @@ class SettingsExchangeTest {
         assertTrue(stock.alertBeep)
         assertEquals(ViewMode.BY_CLASS, stock.viewMode)
         assertTrue(stock.showRssiBar)
+        assertFalse(stock.showLivePath)
+        assertEquals(0.5f, stock.livePathSplit, 0.001f)
         assertTrue(stock.showFleetName)
         assertTrue(stock.showFrequency)
         assertTrue(stock.showSeenTimes)
@@ -108,6 +172,7 @@ class SettingsExchangeTest {
             """{"showWifi":false,"showBle":true}""",
         )
         assertFalse(oldFilter.hideMine)
+        assertFalse(oldFilter.hideRandomizedBle)
         assertFalse(oldFilter.showWifi)
         assertEquals("plaza -80", pack.presets.last().name)
         assertEquals(setOf("hide-phones"), pack.hiddenPresetIds)
@@ -148,6 +213,39 @@ class SettingsExchangeTest {
         assertTrue(next.fleets.any { it.id == "custom-keep-me" })
         assertEquals(local.fleets.size, next.fleets.size)
         assertEquals(setOf("BLE:AA:BB:CC:DD:EE:FF"), next.arrivalKnownKeys)
+    }
+
+    @Test
+    fun importCopiesATypedCallsignAndLeavesTheInstallTag() {
+        val local = localConfig(
+            settings = AppSettings(takCallsign = "", disclaimerAccepted = true, disclaimerRev = DISCLAIMER_REV),
+        ).copy(takInstallTag = "AB23", takLegacySelfRetired = false)
+        val named = SettingsExchange.pack(
+            settings = AppSettings(takCallsign = "  Scout 1  "),
+            filter = FilterState(),
+            presets = stockPresets,
+            watchlist = emptyList(),
+            hiddenPresetIds = emptySet(),
+            appVersion = "1.1.27",
+            exportedAt = "2026-10-19T00:00:00Z",
+        )
+        val (next, _) = SettingsExchange.apply(local, named)
+        assertEquals("AB23", next.takInstallTag)
+        assertFalse(next.takLegacySelfRetired)
+        assertEquals("Scout 1", next.settings.takCallsign)
+        val blank = SettingsExchange.pack(
+            settings = AppSettings(takCallsign = "   "),
+            filter = FilterState(),
+            presets = stockPresets,
+            watchlist = emptyList(),
+            hiddenPresetIds = emptySet(),
+            appVersion = "1.1.27",
+            exportedAt = "2026-10-19T00:00:00Z",
+        )
+        val (cleared, _) = SettingsExchange.apply(next, blank)
+        assertEquals("", cleared.settings.takCallsign)
+        assertEquals("AB23", cleared.takInstallTag)
+        assertEquals("sw33p3r_-AB23", TakInstall.callsign(cleared.settings.takCallsign, cleared.takInstallTag))
     }
 
     @Test
@@ -224,6 +322,7 @@ class SettingsExchangeTest {
             gnssFullTracking = true,
             gnssCorrelation = true,
             gnssInvertAgc = true,
+            gnssRawLog = true,
         )
         val encoded = SettingsExchange.encode(
             SettingsExchange.pack(
@@ -238,6 +337,7 @@ class SettingsExchangeTest {
         )
         assertTrue(encoded.contains("\"gnssSensitivity\": \"HIGH\""))
         assertTrue(encoded.contains("\"gnssMonitor\": true"))
+        assertTrue(encoded.contains("\"gnssRawLog\": true"))
         val parsed = SettingsExchange.parse(encoded)
         assertEquals(tuned.gnssSettings(), parsed.settings.gnssSettings())
         val (next, _) = SettingsExchange.apply(localConfig(), parsed)
@@ -266,10 +366,80 @@ class SettingsExchangeTest {
         assertFalse(missing.gnssMonitor)
         assertEquals(GnssSensitivity.MEDIUM, missing.gnssSensitivity)
         assertEquals(TakGnssSend.OFF, missing.takGnss)
+        assertEquals(TakGnssHold.HOUR, missing.takGnssHold)
+        assertEquals(TakGnssHold.HOUR, missing.takRadioHold)
         assertEquals(TakFloodSend.OFF, missing.takFlood)
+        assertEquals("", missing.takCallsign)
         assertEquals(GnssAlertFloor.MEDIUM, missing.gnssAlertFloor)
         assertTrue(missing.gnssBeep)
         assertTrue(missing.gnssVoice)
         assertFalse(missing.gnssShade)
+        assertFalse(missing.gnssRawLog)
+        assertFalse(missing.trustedWatch)
+        assertFalse(missing.trackerFollow)
+        assertFalse(missing.trackerPlaces)
+        assertTrue(missing.trustedDowngrade)
+        assertTrue(missing.trustedVendor)
+        assertTrue(missing.trustedAway)
+        assertEquals(1_000, missing.trustedAwayMeters)
+        assertEquals(-85, missing.trustedFloorDbm)
+        assertTrue(missing.trustedLearn)
+        assertEquals(3, missing.trustedLearnDays)
+        assertTrue(missing.trustedBeep)
+        assertTrue(missing.trustedVoice)
+        assertFalse(missing.trustedShade)
+        assertEquals(GnssAlertFloor.MEDIUM, missing.trustedAlertFloor)
+        assertFalse(missing.trustedTak)
+        assertEquals(TakGnssHold.HOUR, missing.trustedTakHold)
+        assertEquals(MapBasemap.OSM, missing.mapBasemap)
+        assertEquals(MapFooter.OFF, missing.mapFooter)
+        assertFalse(missing.mapRotate)
+        assertEquals(-1, missing.mapFrame)
+        assertEquals(MapCameraMarks.VIEW, missing.mapCameras)
+        val legacyPath = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            """{"mapCameras":"PATH"}""",
+        )
+        assertEquals(MapCameraMarks.VIEW, legacyPath.mapCameras)
+        val camerasOff = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            """{"mapCameras":"OFF"}""",
+        )
+        assertEquals(MapCameraMarks.OFF, camerasOff.mapCameras)
+        assertEquals(MapFrame.NORTH, missing.mapHome)
+        assertEquals(MapFrame.NORTH, MapFrame.resolved(missing.mapFrame, missing.mapRotate))
+        val turned = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            """{"mapRotate":true}""",
+        )
+        assertEquals(MapFrame.TRAVEL, MapFrame.resolved(turned.mapFrame, turned.mapRotate))
+        val close = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            """{"mapFrame":2,"mapHome":1}""",
+        )
+        assertEquals(MapFrame.CLOSE, close.mapFrame)
+        assertEquals(MapFrame.TRAVEL, close.mapHome)
+        val closeNorth = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            """{"mapFrame":3}""",
+        )
+        assertEquals(MapFrame.CLOSE_NORTH, closeNorth.mapFrame)
+        assertEquals(MapFrame.CLOSE_NORTH, MapFrame.resolved(closeNorth.mapFrame, closeNorth.mapRotate))
+        val kept = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            """{"mapBasemap":"USGS_TOPO"}""",
+        )
+        assertEquals(MapBasemap.USGS_TOPO, kept.mapBasemap)
+        assertEquals(MapFooter.OFF, kept.mapFooter)
+        val footer = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            """{"mapFooter":"GPS"}""",
+        )
+        assertEquals(MapFooter.GPS, footer.mapFooter)
+        val round = SettingsExchange.json.decodeFromString(
+            AppSettings.serializer(),
+            SettingsExchange.json.encodeToString(AppSettings.serializer(), footer),
+        )
+        assertEquals(MapFooter.GPS, round.mapFooter)
     }
 }

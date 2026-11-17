@@ -202,7 +202,7 @@ class AircraftTrailTest {
         assertFalse(key.contains("28.787120"))
         assertFalse(key.contains("-81.360360"))
         assertTrue(key.contains("last masked"))
-        assertTrue(key.contains("pilot masked"))
+        assertTrue(key.contains("Operator masked"))
         assertTrue(key.contains("130 m"))
         assertTrue(key.contains("course 90"))
         val plain = masked.toPlainText()
@@ -219,7 +219,7 @@ class AircraftTrailTest {
             extraAttention = false,
             named = false,
             mac = mac,
-            advertisedNote = "Airborne · UAS $serial · last 28.787120, -81.365491 · pilot 28.787120, -81.360360",
+            advertisedNote = "Airborne · UAS $serial · last 28.787120, -81.365491 · Operator 28.787120, -81.360360",
         )
         val figure = SitPathPlot.Figure(
             kicker = "OPERATOR PATH",
@@ -256,6 +256,38 @@ class AircraftTrailTest {
             aircraft = "Freefly Alta X Gen2",
         )
         assertTrue(note.startsWith("Freefly Alta X Gen2 · Airborne · UAS 18179132000209"))
+        val takeoff = AircraftTrail.advertisedNote(
+            status = "",
+            uasId = "",
+            label = "Remote ID",
+            lat = 28.0,
+            lon = -81.0,
+            alt = null,
+            heading = null,
+            speed = null,
+            pilotLat = 28.1,
+            pilotLon = -81.1,
+            opKind = OperatorLoc.TAKEOFF,
+        )
+        assertTrue(takeoff.contains("Takeoff 28.100000, -81.100000"))
+        val mark = AircraftTrail.pilotMark(
+            AircraftTrail.Picture(
+                uasId = "1",
+                title = "1",
+                fixes = listOf(PayloadFix(1L, 28.0, -81.0)),
+                status = "",
+                alt = null,
+                heading = null,
+                speed = null,
+                pilotLat = 28.1,
+                pilotLon = -81.1,
+                opKind = OperatorLoc.FIXED,
+                pilotOnMap = true,
+                onWalk = true,
+                ownFigure = false,
+            ),
+        )
+        assertEquals("Fixed", mark!!.label)
         val text = AircraftTrail.body(
             listOf(
                 AircraftTrail.Picture(
@@ -276,6 +308,50 @@ class AircraftTrailTest {
             ),
         )
         assertEquals("  Freefly Alta X", text.lines()[1])
+    }
+
+    @Test
+    fun bodyNamesTheGridAndWhereThePhoneWas() {
+        val at = 1_700_000_000_000L
+        val pic = AircraftTrail.Picture(
+            uasId = "SN",
+            title = "SN",
+            fixes = listOf(PayloadFix(at, 36.2361322, -115.0820944)),
+            status = "",
+            alt = null,
+            heading = null,
+            speed = null,
+            pilotLat = 36.24,
+            pilotLon = -115.09,
+            opKind = OperatorLoc.LIVE,
+            pilotOnMap = false,
+            onWalk = false,
+            ownFigure = true,
+            fixAt = at,
+            phoneLat = 36.23,
+            phoneLon = -115.08,
+            opAt = at,
+            opPhoneLat = 36.23,
+            opPhoneLon = -115.08,
+        )
+        val text = AircraftTrail.body(listOf(pic))
+        assertTrue(text.contains("11S PA 72349 11844"))
+        assertTrue(text.contains("from this phone at"))
+        assertTrue(text.contains("Pilot"))
+        val older = AircraftTrail.body(
+            listOf(
+                pic.copy(
+                    fixAt = null,
+                    phoneLat = null,
+                    phoneLon = null,
+                    opAt = null,
+                    opPhoneLat = null,
+                    opPhoneLon = null,
+                ),
+            ),
+        )
+        assertTrue(older.contains("11S PA 72349 11844"))
+        assertFalse(older.contains("from this phone"))
     }
 
     @Test

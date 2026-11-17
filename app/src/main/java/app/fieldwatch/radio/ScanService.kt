@@ -1,23 +1,38 @@
 package app.fieldwatch.radio
 
+import app.fieldwatch.domain.LanguageText
+
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ServiceInfo
+import android.location.LocationManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import app.fieldwatch.MainActivity
 import app.fieldwatch.R
 import app.fieldwatch.FieldwatchApp
+import app.fieldwatch.domain.MacUtil
 import app.fieldwatch.domain.Observation
+import app.fieldwatch.domain.RadioDb
 import app.fieldwatch.domain.TakFlood
 import app.fieldwatch.domain.TakGnss
+import app.fieldwatch.domain.TrustedNets
+import app.fieldwatch.domain.TwinHear
+import app.fieldwatch.domain.RadioBookmarks
 import app.fieldwatch.domain.RadioKind
+import app.fieldwatch.domain.Sighting
+import app.fieldwatch.domain.TrackerWatch
+import app.fieldwatch.domain.trustedOpt
 import app.fieldwatch.domain.ScanIntensity
 import app.fieldwatch.domain.detectionPolicy
 import android.os.SystemClock
@@ -39,6 +54,8 @@ class ScanService : LifecycleService() {
     private var bleStartJob: Job? = null
     private var gnssStartJob: Job? = null
     private var gnssReady = false
+    private val locationQuiet = LocationQuietWindow(nowMs = SystemClock::elapsedRealtime)
+    private var locationWatching = false
     private var lastIntensity: ScanIntensity? = null
     private var lastNotifAt = 0L
     private val inbound = Channel<Observation>(512, BufferOverflow.DROP_OLDEST)
@@ -72,34 +89,60 @@ class ScanService : LifecycleService() {
         startAsForeground()
         app.devices.setScanning(true, wifi.throttleHint())
         publishScanRadio()
+        val locationOn = runCatching { app.systemLocationOn() }.getOrDefault(false)
+        locationQuiet.seed(locationOn)
+        registerLocationWatch()
         app.syncLocationUpdates()
-        restartRadios()
+        if (locationOn) restartRadios()
         gnssStartJob = lifecycleScope.launch {
             delay(GNSS_START_DELAY_MS)
             gnssReady = true
-            app.syncGnss()
+            if (isActive && !locationQuiet.locationHeld()) app.syncGnss()
         }
         pump = lifecycleScope.launch(Dispatchers.Default) { drainInbound() }
         loop = lifecycleScope.launch(Dispatchers.Default) {
             while (isActive) {
-                val settings = app.config.settings
-                if (lastIntensity != settings.intensity) restartRadios()
-                val unthrottled = !WifiRadio.osScanThrottled(this@ScanService)
-                val wifiMin = if (unthrottled) {
-                    WifiRadio.FAST_INTERVAL_MS
-                } else when (settings.intensity) {
-                    ScanIntensity.PERFORMANCE -> 30_000L
-                    ScanIntensity.BALANCED -> 40_000L
-                    ScanIntensity.SAVER -> 55_000L
+                val locationOn = runCatching { app.systemLocationOn() }.getOrDefault(false)
+                noteLocation(locationOn)
+                val hold = locationQuiet.radioHoldMs()
+                if (hold > 0L) {
+                    delay(hold.coerceAtMost(2_000L))
+                    continue
                 }
-                wifi.requestScan(wifiMin, unthrottled = unthrottled)
-                if (!bleStartPending() && ble.needsRestart()) {
-                    app.devices.setRadioHold(ble = true)
-                    if (ble.isRunning()) {
-                        ble.stop()
-                        delay(ble.restartBackoffMs())
+                var resumeRadios = false
+                if (locationOn) {
+                    resumeRadios = locationQuiet.takeRadioResume()
+                    if (resumeRadios) restartRadios()
+                    val settings = app.config.settings
+                    if (lastIntensity != settings.intensity) restartRadios()
+                    val unthrottled = !WifiRadio.osScanThrottled(this@ScanService)
+                    val wifiMin = if (unthrottled) {
+                        WifiRadio.FAST_INTERVAL_MS
+                    } else when (settings.intensity) {
+                        ScanIntensity.PERFORMANCE -> 30_000L
+                        ScanIntensity.BALANCED -> 40_000L
+                        ScanIntensity.SAVER -> 55_000L
                     }
-                    ble.start(settings.intensity)
+                    if (!locationQuiet.radiosHeld()) {
+                        wifi.requestScan(wifiMin, unthrottled = unthrottled)
+                    }
+                    if (!bleStartPending() && ble.needsRestart() && !locationQuiet.radiosHeld()) {
+                        app.devices.setRadioHold(ble = true)
+                        if (ble.isRunning()) {
+                            ble.stop()
+                            delay(ble.restartBackoffMs())
+                        }
+                        when {
+                            locationQuiet.radiosHeld() -> Unit
+                            locationQuiet.takeRadioResume() -> {
+                                // The shade toggle landed during this backoff. Stagger BLE
+                                // instead of starting it on the same pass as the GPS listener.
+                                resumeRadios = true
+                                restartRadios()
+                            }
+                            else -> ble.start(settings.intensity)
+                        }
+                    }
                 }
                 app.devices.setRadioHold(
                     wifi = wifi.waitingOnOs(),
@@ -116,18 +159,79 @@ class ScanService : LifecycleService() {
                 app.pairingFlood.tick(System.currentTimeMillis(), app.floodSpeed())
                 app.sits.noteFloods(app.pairingFlood.bursts())
                 app.sits.noteFloods(app.wifiFlood.bursts())
-                if (gnssReady) {
+                val locationHeld = locationQuiet.locationHeld()
+                val resumeLocation = !resumeRadios && locationQuiet.takeLocationResume()
+                if (resumeLocation) {
+                    app.resubscribeLocationUpdates()
+                } else if (
+                    !resumeRadios &&
+                    !locationHeld &&
+                    !app.locationUpdatesActive() &&
+                    app.locationTagWanted() &&
+                    locationOn
+                ) {
+                    app.syncLocationUpdates()
+                }
+                if (gnssReady && !locationHeld && !resumeLocation && !resumeRadios) {
                     app.syncGnss()
                     app.sits.noteGnss(app.gnss.marks())
                 }
+                app.tickCell(locationHeld)
+                ageTrackers(app)
                 publishNow()
                 delay(2_000L)
             }
         }
     }
 
+    private val locationWatch = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val app = application as? FieldwatchApp ?: return
+            noteLocation(runCatching { app.systemLocationOn() }.getOrDefault(false))
+        }
+    }
+
+    private fun registerLocationWatch() {
+        if (locationWatching) return
+        val filter = IntentFilter().apply {
+            addAction(LocationManager.MODE_CHANGED_ACTION)
+            addAction(LocationManager.PROVIDERS_CHANGED_ACTION)
+        }
+        runCatching {
+            ContextCompat.registerReceiver(
+                this,
+                locationWatch,
+                filter,
+                ContextCompat.RECEIVER_NOT_EXPORTED,
+            )
+            locationWatching = true
+        }
+    }
+
+    private fun unregisterLocationWatch() {
+        if (!locationWatching) return
+        runCatching { unregisterReceiver(locationWatch) }
+        locationWatching = false
+    }
+
+    /** Stop both radios on the way down, and again for the quiet window on the way up. */
+    private fun noteLocation(on: Boolean) {
+        val rose = locationQuiet.observe(on)
+        if (rose || !on) holdRadiosForLocation()
+    }
+
+    private fun holdRadiosForLocation() {
+        bleStartJob?.cancel()
+        bleStartJob = null
+        if (::ble.isInitialized) ble.stop()
+        if (::wifi.isInitialized) wifi.stop()
+    }
+
     private fun restartRadios() {
-        val intensity = (application as FieldwatchApp).config.settings.intensity
+        val app = application as FieldwatchApp
+        if (locationQuiet.radiosHeld()) return
+        if (!runCatching { app.systemLocationOn() }.getOrDefault(false)) return
+        val intensity = app.config.settings.intensity
         lastIntensity = intensity
         wifi.start()
         if (ble.isRunning()) {
@@ -139,7 +243,13 @@ class ScanService : LifecycleService() {
         // OEM stacks at launch when Bluetooth and Location are both on.
         bleStartJob = lifecycleScope.launch(Dispatchers.Default) {
             delay(BLE_START_STAGGER_MS)
-            ble.start((application as FieldwatchApp).config.settings.intensity)
+            if (!isActive || locationQuiet.radiosHeld()) return@launch
+            val app = application as FieldwatchApp
+            if (!runCatching { app.systemLocationOn() }.getOrDefault(false)) return@launch
+            ble.start(app.config.settings.intensity)
+            if (locationQuiet.radiosHeld() || !runCatching { app.systemLocationOn() }.getOrDefault(false)) {
+                ble.stop()
+            }
         }
     }
 
@@ -194,6 +304,17 @@ class ScanService : LifecycleService() {
                 }
                 app.sits.noteFloods(app.pairingFlood.bursts())
                 app.sits.ingest(seen, fleets, app.config.watchlist)
+                considerTrusted(app, tagged)
+                if (settings.placeWatch && settings.tagLocation) {
+                    app.places.hear(
+                        seen,
+                        fleets,
+                        app.config.watchlist,
+                        app.sits.openSitId(),
+                        app.sits.clusterLabel(),
+                    )
+                }
+                considerTrackers(app, seen, tagged)
                 if (settings.loggingEnabled) {
                     val toLog = seen.filter { it.hitCount <= 1 || it.hitCount % 25 == 0 }.take(16)
                     for (row in toLog) {
@@ -217,6 +338,125 @@ class ScanService : LifecycleService() {
         }
     }
 
+    /**
+     * Separated-tag clock and the two-stop popup. The current advertisement decides
+     * separated or near. Mine stays quiet. A switch that is off does not keep a clock.
+     */
+    private fun considerTrackers(app: FieldwatchApp, seen: List<Sighting>, tagged: List<Observation>) {
+        val settings = app.config.settings
+        val now = System.currentTimeMillis()
+        val followOn = settings.trackerFollow && settings.tagLocation
+        val placesOn = settings.trackerPlaces && settings.placeWatch && settings.tagLocation
+        val placeFresh = app.places.trackerPlaces(placesOn, now, seen)
+        val names = app.config.fleets.associate { it.id to it.name }
+        val labels = RadioBookmarks.labels(app.config.watchlist)
+        val hears = ArrayList<TrackerWatch.Hear>(seen.size)
+        for (i in seen.indices) {
+            val row = seen[i]
+            if (row.kind != RadioKind.BLE) continue
+            hears += TrackerWatch.Hear(
+                device = row,
+                packet = tagged.getOrNull(i)?.facts ?: row.facts,
+                fleetNames = row.fleetIds.mapNotNull { id -> names[id] },
+                custom = labels[row.key],
+            )
+        }
+        val fix = if (settings.tagLocation) app.lastFix else null
+        val before = app.tracker.notice.value?.id
+        val raised = app.tracker.hear(
+            hears = hears,
+            mine = RadioBookmarks.mineKeys(app.config.watchlist),
+            lat = fix?.first,
+            lon = fix?.second,
+            now = now,
+            followOn = followOn,
+            placesOn = placesOn,
+            placeFresh = placeFresh,
+        )
+        val after = app.tracker.notice.value
+        if (raised != null || (before != null && after?.id != before)) {
+            app.syncTrackerShade(after)
+        }
+    }
+
+    /** Lets a separated clock finish, or drop, between advertisements. */
+    private fun ageTrackers(app: FieldwatchApp) {
+        val settings = app.config.settings
+        val followOn = settings.trackerFollow && settings.tagLocation
+        val showing = app.tracker.notice.value
+        if (!followOn && showing == null) return
+        val before = showing?.id
+        val placesOn = settings.trackerPlaces && settings.placeWatch && settings.tagLocation
+        val raised = app.tracker.hear(
+            hears = emptyList(),
+            mine = RadioBookmarks.mineKeys(app.config.watchlist),
+            lat = null,
+            lon = null,
+            now = System.currentTimeMillis(),
+            followOn = followOn,
+            placesOn = placesOn,
+            placeFresh = emptyList(),
+        )
+        val after = app.tracker.notice.value
+        if (raised != null || (before != null && after?.id != before)) {
+            app.syncTrackerShade(after)
+        }
+    }
+
+    /**
+     * Trusted names only. Location comes from the GPS fix, not a network fix on the row.
+     * A quiet or cached hear still goes in so a dismissed episode can keep its clock.
+     */
+    private fun considerTrusted(app: FieldwatchApp, batch: List<Observation>) {
+        if (app.trusted.snapshot().nets.isEmpty()) return
+        val settings = app.config.settings
+        val opt = settings.trustedOpt()
+        val now = System.currentTimeMillis()
+        val fix = app.trustFix(now)
+        val demo = settings.demoMode
+        for (obs in batch) {
+            if (obs.kind != RadioKind.WIFI || obs.hiddenSsid || obs.name.isBlank()) continue
+            val alert = app.trusted.hear(
+                TwinHear(
+                    ssid = obs.name,
+                    bssid = obs.mac,
+                    rssi = obs.rssi,
+                    fresh = obs.fresh,
+                    securityText = obs.facts.security,
+                    channel = obs.channel,
+                    frequencyMhz = obs.frequencyMhz,
+                    vendor = RadioDb.vendorForMac(obs.mac),
+                    lat = fix.lat,
+                    lon = fix.lon,
+                    accuracyM = fix.accuracyM,
+                    locationPaused = fix.paused,
+                ),
+                opt,
+                now,
+            ) ?: continue
+            val sentence = TrustedNets.sentence(alert.ssid, alert.reasons)
+            val note = if (alert.ouiNote) {
+                LanguageText.text("trusted.oui.note", mapOf("oui" to "00:13:37"))
+            } else {
+                null
+            }
+            val body = buildString {
+                append(MacUtil.screenMac(alert.bssid, demo))
+                if (note != null) {
+                    append('\n')
+                    append(note)
+                }
+            }
+            app.alerter.trustedAlert(
+                title = sentence,
+                body = body,
+                phrase = if (alert.voice) sentence else null,
+                beep = alert.beep,
+                shade = alert.shade,
+            )
+        }
+    }
+
     private fun schedulePublish() {
         val now = SystemClock.elapsedRealtime()
         synchronized(publishGate) {
@@ -235,7 +475,7 @@ class ScanService : LifecycleService() {
         }
     }
 
-    private fun publishNow() {
+    private suspend fun publishNow() {
         try {
             val app = application as FieldwatchApp
             val fleets = app.config.fleets
@@ -263,6 +503,7 @@ class ScanService : LifecycleService() {
                     beepOn = settings.alertBeep,
                     voiceOn = settings.alertVoice,
                     voiceWhat = settings.alertVoiceWhat,
+                    spokenNames = settings.spokenNames,
                     shadeOn = settings.alertShade,
                     visibleOnLive = app::wouldShowOnLive,
                     arrivalsOnly = app.config.filter.arrivalsOnly,
@@ -275,14 +516,29 @@ class ScanService : LifecycleService() {
                 TakGnss.line(settings.takGnss, gnss.notice, gnss.lives),
                 TakFlood.line(settings.takFlood, floodNotice),
             ).joinToString("\n").ifBlank { null }
-            app.tak.publish(
+            val cfg = app.config.config.value
+            val legacyRetired = app.tak.publish(
                 live,
                 fleets,
                 settings,
                 app.config.watchlist,
                 selfFix = app.lastFix,
                 gnssRemark = phoneNote,
+                gnssNotice = gnss.notice,
+                gnssLives = gnss.lives,
+                installTag = cfg.takInstallTag,
+                legacySelfRetired = cfg.takLegacySelfRetired,
             )
+            if (legacyRetired) {
+                app.config.update { cur ->
+                    if (cur.takLegacySelfRetired) cur else cur.copy(takLegacySelfRetired = true)
+                }
+            }
+            val takOn = settings.takEnabled && !settings.demoMode
+            val plan = app.trusted.planCot(settings.trustedOpt(), takOn, System.currentTimeMillis())
+            if (plan.xml.isNotEmpty() && app.tak.sendNow(settings, plan.xml)) {
+                app.trusted.commitCot(plan)
+            }
             app.station.publish(live, fleets, settings, app.lastFix, app.lastFixAccuracyM)
         } catch (e: CancellationException) {
             throw e
@@ -292,7 +548,7 @@ class ScanService : LifecycleService() {
     }
 
     private fun startAsForeground() {
-        val notification = buildNotification("Starting radios…")
+        val notification = buildNotification(LanguageText.text("ui.starting.radios"))
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
                 NOTIF_ID,
@@ -336,7 +592,7 @@ class ScanService : LifecycleService() {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_fieldwatch)
-            .setContentTitle("sw33p3r_ scanning")
+            .setContentTitle(LanguageText.text("ui.fieldwatch.scanning"))
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -361,6 +617,7 @@ class ScanService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        unregisterLocationWatch()
         loop?.cancel()
         pump?.cancel()
         bleStartJob?.cancel()
@@ -401,7 +658,7 @@ class ScanService : LifecycleService() {
         val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL, "Scanning", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Passive Wi-Fi and Bluetooth scan status"
+                description = LanguageText.text("ui.passive.wi.fi.bluetooth")
                 setShowBadge(false)
             },
         )

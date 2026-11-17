@@ -90,6 +90,10 @@ object DefaultCatalog {
         pigvision(),
         fsExtBattery(),
         appleDevice(),
+        homekit(),
+        matter(),
+        bthome(),
+        exposureNotification(),
         appleAudio(),
         microsoftDevice(),
         tesla(),
@@ -111,6 +115,7 @@ object DefaultCatalog {
         bose(),
         garmin(),
         amazon(),
+        sidewalk(),
         fitbit(),
         polar(),
         oura(),
@@ -122,6 +127,7 @@ object DefaultCatalog {
         insta360(),
         dji(),
         djiPower(),
+        xiaomiMiHome(),
         remoteId(),
         skydio(),
         autel(),
@@ -134,6 +140,7 @@ object DefaultCatalog {
         yuneec(),
         swellPro(),
         crazyflie(),
+        expressLrs(),
         netgear(),
         tpLink(),
         asus(),
@@ -263,18 +270,36 @@ object DefaultCatalog {
         cradlepoint(),
         airlink(),
         compex(),
-        novatelWireless(),
         utilityInc(),
         tapo(),
         reolink(),
+        ezviz(),
         hikvision(),
         dahua(),
         meshtastic(),
         helium(),
         meshCore(),
+        bitchat(),
         goTenna(),
         senseCap(),
         rakWisGate(),
+        icomId52(),
+        icomIc705(),
+        icomId5200(),
+        icomUt137(),
+        icomVs3(),
+        yaesuSsmBt10(),
+        yaesuSsmBt20(),
+        kenwoodKhs55Bt(),
+        kenwoodKhs56Bt(),
+        vgcBhm88(),
+        benshiRadio(),
+        tidradioTdH9(),
+        wirelessCpsRadio(),
+        blePttButton(),
+        bleKissTnc(),
+        codaPttButton(),
+        ainaSmartButton(),
         genetec(),
         blueToadSpectra(),
         blipTrack(),
@@ -299,6 +324,7 @@ object DefaultCatalog {
         unifiProtect(),
         hobbyBleSerial(),
         metaGlasses(),
+        metaQuest(),
         snapSpectacles(),
         vuzix(),
         brilliantFrame(),
@@ -328,6 +354,32 @@ object DefaultCatalog {
         omronHealthcare(),
         withings(),
         dexcom(),
+        samsungTv(),
+        googleCast(),
+        levoit(),
+        melk(),
+        midea(),
+        zebra(),
+        jlab(),
+        scentAir(),
+        escort(),
+        gardPro(),
+        chb(),
+        vizio(),
+        owlet(),
+        tandem(),
+        sleepTracker(),
+        whoop(),
+        soundcore(),
+        hume(),
+        platco(),
+        harpBt(),
+        gt201(),
+        neewer(),
+        mai70(),
+        blackvue(),
+        galaxyWatch(),
+        galaxyBuds(),
     ).sortedBy { it.name.lowercase() }
 
     private fun flockCameras() = Fleet(
@@ -411,14 +463,13 @@ object DefaultCatalog {
         colorIndex = Hue.TRACKER,
         kind = SignatureClass.FINDER,
         matchAny = true,
-        notes = "Samsung SmartTag / SmartTag+ item finder. Addresses often rotate.",
+        notes = "Samsung SmartTag / SmartTag+ item finder. Matches the name or service FD5A. Addresses often rotate.",
         builtIn = true,
         rules = listOf(
             name("SmartTag"),
             name("Smart Tag"),
             name("Galaxy SmartTag"),
             uuid("FD5A"),
-            mfg(0x0075),
         ),
     )
 
@@ -591,6 +642,79 @@ object DefaultCatalog {
             name("iPhone"),
             name("iPad"),
             name("MacBook"),
+        ),
+    )
+
+    private fun homekit() = Fleet(
+        id = "fleet-homekit",
+        name = "HomeKit",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "HomeKit accessory advertising over Bluetooth. The category and the paired line are what the accessory broadcasts. Not an iPhone and not an AirTag.",
+        builtIn = true,
+        rules = listOf(
+            MatchRule(
+                RuleKind.MANUFACTURER_DATA,
+                companyId = 0x004C,
+                dataPrefixHex = "06",
+                radio = RadioKind.BLE,
+            ),
+        ),
+    )
+
+    private fun matter() = Fleet(
+        id = "fleet-matter",
+        name = "Matter",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Matter device advertising over Bluetooth, usually while it is in setup. Vendor and product IDs are what the device sends. They are not a proof of the retail name.",
+        builtIn = true,
+        rules = listOf(
+            MatchRule(
+                RuleKind.SERVICE_UUID,
+                text = "FFF6",
+                radio = RadioKind.BLE,
+            ),
+        ),
+    )
+
+    private fun bthome() = Fleet(
+        id = "fleet-bthome",
+        name = "BTHome",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "BTHome v2 sensor or binary sensor (Shelly and many ESPHome devices). Measurements are whatever the device puts in the advertisement. Encrypted packets only show that they are encrypted.",
+        builtIn = true,
+        rules = listOf(
+            MatchRule(
+                RuleKind.SERVICE_UUID,
+                text = "FCD2",
+                radio = RadioKind.BLE,
+            ),
+        ),
+    )
+
+    private fun exposureNotification() = Fleet(
+        id = "fleet-exposure-notification",
+        name = "Exposure Notification",
+        enabled = true,
+        colorIndex = Hue.FIND_MY,
+        kind = SignatureClass.PHONE,
+        matchAny = true,
+        notes = "Apple/Google Exposure Notification (COVID-era contact tracing). The identifier rotates and the metadata is encrypted. This is not a finder tag and not a name for the phone.",
+        builtIn = true,
+        rules = listOf(
+            MatchRule(
+                RuleKind.SERVICE_UUID,
+                text = "FD6F",
+                radio = RadioKind.BLE,
+            ),
         ),
     )
 
@@ -884,13 +1008,28 @@ object DefaultCatalog {
         colorIndex = Hue.HOME_CAM,
         kind = SignatureClass.HOME,
         matchAny = true,
-        notes = "Amazon Echo, Fire, or Kindle when it advertises. Not every AmazonBasics gadget.",
+        notes = "Amazon Echo, Fire, or Kindle when it advertises. Not every AmazonBasics gadget. Amazon Sidewalk (UUID 03FE plus this company ID) is the Sidewalk row, not this one.",
         builtIn = true,
         rules = listOf(
             mfg(0x0171),
             bleName("Echo"),
             bleName("Amazon"),
             bleName("Fire TV"),
+        ),
+    )
+
+    private fun sidewalk() = Fleet(
+        id = "fleet-sidewalk",
+        name = "Amazon Sidewalk",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = false,
+        notes = "Amazon Sidewalk endpoint or accessory using the AMA UUID and Amazon's company ID. It can take part in Amazon's crowdsourced network. Not a proof of which Amazon product, and not by itself an Echo.",
+        builtIn = true,
+        rules = listOf(
+            MatchRule(RuleKind.SERVICE_UUID, text = "03FE", radio = RadioKind.BLE),
+            MatchRule(RuleKind.MANUFACTURER_ID, companyId = 0x0171, radio = RadioKind.BLE),
         ),
     )
 
@@ -1016,7 +1155,7 @@ object DefaultCatalog {
         colorIndex = Hue.CAMERA,
         kind = SignatureClass.CAMERA,
         matchAny = true,
-        notes = "DJI Osmo handheld / action camera (Action, Pocket, 360, Nano). Not a flying DJI aircraft.",
+        notes = "DJI Osmo handheld / action camera (Action, Pocket, 360, Nano). A Wi-Fi name that starts with osmo_ is this row. Not a flying DJI aircraft.",
         builtIn = true,
         decode = CatalogDecodes.djiModel,
         rules = OSMO_CAMERA_MFG_PREFIXES.map { mfgData(0x08AA, it) } + listOf(
@@ -1030,6 +1169,7 @@ object DefaultCatalog {
             glob("Osmo Nano*"),
             glob("XtraEdgePro*"),
             glob("Xtra Edge Pro*"),
+            glob("osmo_*"),
         ),
     )
 
@@ -1066,7 +1206,7 @@ object DefaultCatalog {
         colorIndex = Hue.DRONE,
         kind = SignatureClass.DRONE,
         matchAny = true,
-        notes = "DJI aircraft, controller, or setup Wi-Fi. Handheld Osmo cameras are the Osmo row. Power stations named Power2000 are the DJI Power row. In-flight digital license plate is the Remote ID row.",
+        notes = "DJI aircraft, controller, or setup Wi-Fi. Handheld Osmo cameras are the Osmo row. Power stations named Power2000 are the DJI Power row. The older DroneID beacon, vendor IE 26:37:12, labels this row and does not fill a position. In-flight ASTM Remote ID is the Remote ID row.",
         builtIn = true,
         decode = CatalogDecodes.djiModel,
         rules = listOf(
@@ -1075,6 +1215,7 @@ object DefaultCatalog {
             bleGlob("DJI*"),
             wifiName("DJI"),
             wifiGlob("DJI*"),
+            vendorIe("26:37:12"),
         ),
     )
 
@@ -1091,6 +1232,18 @@ object DefaultCatalog {
         rules = listOf(
             bleGlob("Power2000*"),
         ),
+    )
+
+    private fun xiaomiMiHome() = Fleet(
+        id = "fleet-xiaomi-mihome",
+        name = "Xiaomi Mi Home",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Service FE95 is used by sensors, locks, lights, scooters, and bands in that family, including some Qingping sensors. It does not name the model, and it is not a phone.",
+        builtIn = true,
+        rules = listOf(uuid("FE95")),
     )
 
     private fun netgear() = Fleet(
@@ -1480,11 +1633,12 @@ object DefaultCatalog {
         colorIndex = Hue.FIND_MY,
         kind = SignatureClass.FINDER,
         matchAny = true,
-        notes = "Chipolo item finder (Find Hub / Find My). A tag you clip to keys or a bag.",
+        notes = "Chipolo item finder. A tag you clip to keys or a bag. A renamed tag still matches the Chipolo Bluetooth service. Find Hub tags stay on the Find Hub row.",
         builtIn = true,
         rules = listOf(
             name("Chipolo"),
             glob("Chipolo*"),
+            uuid("FE33"),
         ),
     )
 
@@ -1495,13 +1649,14 @@ object DefaultCatalog {
         colorIndex = Hue.TRACKER,
         kind = SignatureClass.FINDER,
         matchAny = true,
-        notes = "Pebblebee or Motorola moto tag item finder. A tag you clip to keys or a bag.",
+        notes = "Pebblebee or Motorola moto tag item finder. A tag you clip to keys or a bag. A tag that leaves its name off still matches Bluetooth service FA25. That service does not say whether the tag is away from its owner. Find Hub and DULT stay on their own rows.",
         builtIn = true,
         rules = listOf(
             name("Pebblebee"),
             glob("Pebblebee*"),
             name("moto tag"),
             name("Moto Tag"),
+            uuid("FA25"),
         ),
     )
 
@@ -1512,7 +1667,7 @@ object DefaultCatalog {
         colorIndex = Hue.FIND_MY,
         kind = SignatureClass.FINDER,
         matchAny = true,
-        notes = "Google Find Hub / Find My Device network tag (Chipolo, Pebblebee, moto tag, and other partners). Nearby vs separated frames. Separated mode can hold a MAC about a day. Addresses otherwise rotate. Pattern match, not that bag.",
+        notes = "Google Find Hub / Find My Device network tag (Chipolo, Pebblebee, moto tag, and other partners). Normal mode versus separated frames. Separated mode can hold a MAC about a day. Normal mode does not say the tag is with its owner. Addresses otherwise rotate. Pattern match, not that bag.",
         builtIn = true,
         decode = CatalogDecodes.findHub,
         rules = listOf(
@@ -2427,6 +2582,18 @@ object DefaultCatalog {
         ),
     )
 
+    private fun ezviz() = Fleet(
+        id = "fleet-ezviz",
+        name = "EZVIZ",
+        enabled = true,
+        colorIndex = Hue.CAMERA,
+        kind = SignatureClass.CAMERA,
+        matchAny = true,
+        notes = "A name that starts with EZVIZ_ is the setup access point. The characters after the underscore are a serial, not a model. It is a home camera, and that access point is often off.",
+        builtIn = true,
+        rules = listOf(wifiGlob("EZVIZ_*")),
+    )
+
     private fun hikvision() = Fleet(
         id = "fleet-hikvision",
         name = "Hikvision",
@@ -2508,6 +2675,20 @@ object DefaultCatalog {
         ),
     )
 
+    private fun bitchat() = Fleet(
+        id = "fleet-bitchat",
+        name = "Bitchat",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.MESH,
+        matchAny = true,
+        notes = "Bitchat BLE mesh chat between nearby phones. Matches the mainnet service advertisement, so a renamed phone still matches. Pattern match, not that person.",
+        builtIn = true,
+        rules = listOf(
+            uuid("f47b5e2d-4a9e-4c5a-9b3f-8e1d2c3a4b5c"),
+        ),
+    )
+
     private fun goTenna() = Fleet(
         id = "fleet-gotenna",
         name = "goTenna",
@@ -2559,6 +2740,231 @@ object DefaultCatalog {
             wifiGlob("RAK7391*"),
             name("WisGate"),
             glob("WisGate*"),
+        ),
+    )
+
+    private fun icomId52() = Fleet(
+        id = "fleet-icom-id52",
+        name = "Icom ID-52",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Icom ID-52 or ID-52 Plus. The Bluetooth name is ICOM BT(ID-52) while the radio is waiting to pair. This phone does not hear the voice channel. A renamed radio does not match.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("ICOM BT(ID-52)"),
+        ),
+    )
+
+    private fun icomIc705() = Fleet(
+        id = "fleet-icom-ic705",
+        name = "Icom IC-705",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Icom IC-705 portable HF/VHF/UHF transceiver. The Bluetooth name is ICOM BT(IC-705) while the radio's Bluetooth is on. In Wi-Fi access point mode its network is named IC-705 by default. This phone does not hear the voice channel. A renamed radio or network does not match.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("ICOM BT(IC-705)"),
+            wifiGlob("IC-705"),
+        ),
+    )
+
+    private fun icomId5200() = Fleet(
+        id = "fleet-icom-id5200",
+        name = "Icom ID-5200",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Icom ID-5200 VHF/UHF D-STAR mobile radio. The Bluetooth name is ICOM BT(ID-5200) while the radio's Bluetooth is on. This phone does not hear the voice channel. A renamed radio does not match.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("ICOM BT(ID-5200)"),
+        ),
+    )
+
+    private fun icomUt137() = Fleet(
+        id = "fleet-icom-ut137",
+        name = "Icom UT-137",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Icom UT-137 Bluetooth unit fitted inside an ID-4100 mobile radio. Its Bluetooth name is ICOM BT-003. This phone does not hear the voice channel. A renamed unit does not match.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("ICOM BT-003"),
+        ),
+    )
+
+    /**
+     * Bluetooth on these microphones is the audio link, not a setup step.
+     * This phone still only hears a Low Energy advertisement of the name.
+     */
+    private const val RADIO_MIC_HEARD =
+        "That Bluetooth link is how the microphone works. This phone hears a Low Energy advertisement of that name. A name that only appears on the Classic link stays quiet. A renamed microphone does not match."
+
+    private fun radioMic(id: String, name: String, opener: String, pattern: String) = Fleet(
+        id = id,
+        name = name,
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "$opener $RADIO_MIC_HEARD",
+        builtIn = true,
+        rules = listOf(bleGlob(pattern)),
+    )
+
+    private fun icomVs3() = radioMic(
+        "fleet-icom-vs3",
+        "Icom VS-3",
+        "Icom VS-3 wireless microphone. The radio lists it as ICOM BT-002.",
+        "ICOM BT-002",
+    )
+
+    private fun yaesuSsmBt10() = radioMic(
+        "fleet-yaesu-ssm-bt10",
+        "Yaesu SSM-BT10",
+        "Yaesu SSM-BT10 wireless microphone. The radio lists it as SSM-BT10.",
+        "SSM-BT10",
+    )
+
+    private fun yaesuSsmBt20() = radioMic(
+        "fleet-yaesu-ssm-bt20",
+        "Yaesu SSM-BT20",
+        "Yaesu SSM-BT20 wireless microphone. The radio lists it as SSM-BT20.",
+        "SSM-BT20",
+    )
+
+    private fun kenwoodKhs55Bt() = radioMic(
+        "fleet-kenwood-khs-55bt",
+        "Kenwood KHS-55BT",
+        "Kenwood KHS-55BT wireless microphone. The radio lists it as KHS-55BT.",
+        "KHS-55BT",
+    )
+
+    private fun kenwoodKhs56Bt() = radioMic(
+        "fleet-kenwood-khs-56bt",
+        "Kenwood KHS-56BT",
+        "Kenwood KHS-56BT wireless microphone. The radio lists it as KHS-56BT followed by a four-digit code.",
+        "KHS-56BT*",
+    )
+
+    private fun vgcBhm88() = radioMic(
+        "fleet-vgc-bhm-88",
+        "VGC BHM-88",
+        "VGC BHM-88 wireless microphone for a handheld radio. The published name is BHM-88.",
+        "BHM-88",
+    )
+
+    private fun benshiRadio() = Fleet(
+        id = "fleet-benshi-radio",
+        name = "Benshi radio",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Benshi-platform amateur radio sold as BTECH, Radioddity, or Vero. The Bluetooth name is UV-PRO, UV-50PRO, GA-5WB, VR-N75, VR-N76, VR-N7500, VR-N7600, or DB50-B. This phone hears a Low Energy advertisement of that exact name. A renamed radio does not match. This phone does not hear the voice channel.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("UV-PRO"),
+            bleGlob("UV-50PRO"),
+            bleGlob("GA-5WB"),
+            bleGlob("VR-N75"),
+            bleGlob("VR-N76"),
+            bleGlob("VR-N7500"),
+            bleGlob("VR-N7600"),
+            bleGlob("DB50-B"),
+        ),
+    )
+
+    private fun blePttButton() = Fleet(
+        id = "fleet-ble-ptt-button",
+        name = "BLE PTT button",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Wireless push-to-talk button for a phone app such as Zello or WAVE. Pryme, MobilitySound, and similar buttons advertise PTT-Z, PTT-AZ, or PTT-Z01. That Low Energy link is how the button works. A renamed button does not match. A button that is already connected may stay quiet.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("PTT-Z"),
+            bleGlob("PTT-AZ"),
+            bleGlob("PTT-Z01"),
+        ),
+    )
+
+    private fun bleKissTnc() = Fleet(
+        id = "fleet-ble-kiss-tnc",
+        name = "BLE KISS TNC",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Packet-radio modem (KISS TNC) or a radio with a TNC built in, offering the BLE KISS service to a phone APRS or Winlink app. Mobilinkd TNC3 and TNC4, PicoAPRS, B.B. Link, LoRa APRS trackers, and some handheld radios use it. A computer or small board running a KISS bridge can advertise it too. Matches the service, so a renamed device still matches. Most stop advertising while an app is connected. This phone does not hear the radio channel.",
+        builtIn = true,
+        rules = listOf(
+            bleUuid("00000001-ba2a-46c9-ae49-01b0961f68bb"),
+        ),
+    )
+
+    private fun codaPttButton() = Fleet(
+        id = "fleet-coda-ptt-button",
+        name = "Blu-PTT button",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Wireless push-to-talk button for a phone app such as ESChat, ProPTT2, or Sonoran Radio. Blu-PTT and other Coda-compatible buttons advertise this Bluetooth service, so a renamed button still matches. That Low Energy link is how the button works. A button that is already connected may stay quiet. Some buttons advertise only a name and are missed.",
+        builtIn = true,
+        rules = listOf(
+            bleUuid("2320ae58-8394-4652-95f7-0a872ac0958f"),
+        ),
+    )
+
+    private fun ainaSmartButton() = Fleet(
+        id = "fleet-aina-smart-button",
+        name = "AINA PTT Smart Button",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "AINA PTT Smart Button, a wireless push-to-talk button for phone PTT apps such as ESChat. Its Bluetooth Low Energy name is ASB followed by a six-character code, for example ASB99C2F0. That Low Energy link is how the button works. A button that is already connected may stay quiet.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("ASB??????"),
+        ),
+    )
+
+    private fun tidradioTdH9() = Fleet(
+        id = "fleet-tidradio-td-h9",
+        name = "TIDRADIO TD-H9",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "TIDRADIO TD-H9 handheld radio. Its Bluetooth Low Energy name starts with TD-H9, often followed by a dash and four digits. Bluetooth is how the radio is programmed from a phone or browser. This phone does not hear the voice channel. A renamed radio does not match.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("TD-H9*"),
+        ),
+    )
+
+    private fun wirelessCpsRadio() = Fleet(
+        id = "fleet-wireless-cps-radio",
+        name = "Walkie-talkie (wireless programming)",
+        enabled = true,
+        colorIndex = Hue.MESH,
+        kind = SignatureClass.TWO_WAY,
+        matchAny = true,
+        notes = "Handheld radio with phone programming (Wireless CPS) switched on, such as a Baofeng UV-5R Mini. It advertises the generic Bluetooth name walkie-talkie. The name does not say which brand or model. This phone does not hear the voice channel. The name appears when Wireless CPS is switched on.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("walkie-talkie"),
         ),
     )
 
@@ -2933,13 +3339,15 @@ object DefaultCatalog {
         colorIndex = Hue.HOME_CAM,
         kind = SignatureClass.ISP,
         matchAny = true,
-        notes = "UniFi / Ubiquiti name on Wi-Fi or BLE. Prefer UniFi AP for BSSID hits. Instant cameras stay on UniFi Protect.",
+        notes = "UniFi / Ubiquiti name on Wi-Fi or BLE, including a U6- or UXG model name. Prefer UniFi AP for BSSID hits. Instant cameras stay on UniFi Protect.",
         builtIn = true,
         rules = listOf(
             name("UniFi"),
             name("Ubiquiti"),
             glob("UniFi*"),
             glob("UAP-*"),
+            glob("U6-*"),
+            glob("UXG*"),
         ),
     )
 
@@ -3011,7 +3419,7 @@ object DefaultCatalog {
         colorIndex = Hue.GLASSES,
         kind = SignatureClass.GLASSES,
         matchAny = true,
-        notes = "Ray-Ban Meta, Oakley Meta, or Meta Display smart glasses, or a Quest / other Meta wearable.",
+        notes = "Ray-Ban Meta, Oakley Meta, or Meta Display smart glasses. A Quest or Meta Quest name is the Quest row. The same company IDs also show up on other Meta wearables.",
         attentionNote = "Meta / Luxottica BLE — often Ray-Ban Meta smart glasses. A Bluetooth name that starts with Meta RB Display is these glasses. The same company IDs show up on Quest headsets and other Meta wearables. Not proof someone is recording. A miss is not a clean bill (paired and quiet, asleep, or a different brand). Look with your eyes.",
         builtIn = true,
         rules = listOf(
@@ -3027,6 +3435,23 @@ object DefaultCatalog {
             bleGlob("Meta RB Display*"),
             uuid("FEB7"),
             uuid("FEB8"),
+        ),
+    )
+
+    private fun metaQuest() = Fleet(
+        id = "fleet-meta-quest",
+        name = "Meta Quest",
+        enabled = true,
+        colorIndex = Hue.TRACKER,
+        kind = SignatureClass.WEARABLE,
+        matchAny = true,
+        notes = "Meta Quest headset. The Bluetooth name is Quest, or it starts with Quest followed by a space or a hyphen, or it starts with Meta Quest. A Meta radio that does not use that name can still match Ray-Ban / Meta glasses.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("Quest"),
+            bleGlob("Quest *"),
+            bleGlob("Quest-*"),
+            bleGlob("Meta Quest*"),
         ),
     )
 
@@ -3273,7 +3698,6 @@ object DefaultCatalog {
         builtIn = true,
         rules = listOf(
             mfg(0x0434),
-            oui("C8:FA:9C"),
             bleName("Hatch Rest"),
             bleGlob("Hatch Rest*"),
             bleGlob("Hatch Restore*"),
@@ -3306,7 +3730,7 @@ object DefaultCatalog {
         colorIndex = Hue.HOME_CAM,
         kind = SignatureClass.HOME,
         matchAny = true,
-        notes = "Samsung Family Hub fridge, range, or oven setup Wi-Fi. Not a SmartTag.",
+        notes = "Samsung Family Hub fridge, range, or oven. Wi-Fi setup, or a Bluetooth name that starts with [oven]. Not a SmartTag.",
         builtIn = true,
         rules = listOf(
             wifiGlob("[fridge]*"),
@@ -3314,6 +3738,7 @@ object DefaultCatalog {
             wifiGlob("[range]*"),
             wifiGlob("[cooktop]*"),
             wifiGlob("[refrigerator]*"),
+            bleGlob("[oven]*"),
         ),
     )
 
@@ -3583,6 +4008,8 @@ object DefaultCatalog {
             bleGlob("EPSON-WF-*"),
             bleName("EPSON-ET"),
             bleName("EPSON-WF"),
+            bleGlob("ET-* Series"),
+            wifiGlob("ET-* Series"),
         ),
     )
 
@@ -3612,7 +4039,7 @@ object DefaultCatalog {
         colorIndex = Hue.DRONE,
         kind = SignatureClass.DRONE,
         matchAny = true,
-        notes = "In-flight drone digital license plate (ASTM / FAA Remote ID). Decoded fields can show ID, position, heading, and operator. The French Direct Remote ID vendor IE labels this row too. That plate does not fill position or pilot. Pattern match, not a tail number. Wi-Fi Remote ID often misses on stock Android.",
+        notes = "In-flight drone digital license plate (ASTM / FAA Remote ID). Decoded fields can show ID, position, heading, and operator location (takeoff, live GPS, or a fixed point). EU class shows only when the plate says EU. The French Direct Remote ID plate can fill aircraft position, altitude, speed, course, and the takeoff pin. Height above takeoff is not the aircraft pin. Pattern match, not a tail number. Wi-Fi Remote ID often misses on stock Android.",
         builtIn = true,
         decode = CatalogDecodes.remoteId,
         rules = listOf(
@@ -3790,6 +4217,18 @@ object DefaultCatalog {
         rules = listOf(glob("Crazyflie*")),
     )
 
+    private fun expressLrs() = Fleet(
+        id = "fleet-elrs",
+        name = "ExpressLRS",
+        enabled = true,
+        colorIndex = Hue.DRONE,
+        kind = SignatureClass.DRONE,
+        matchAny = true,
+        notes = "The name is the setup network. It can be the transmitter, the receiver, or a backpack. The link used in flight does not advertise this.",
+        builtIn = true,
+        rules = listOf(wifiGlob("ExpressLRS*")),
+    )
+
     private fun cradlepoint() = Fleet(
         id = "fleet-cradlepoint",
         name = "Cradlepoint",
@@ -3858,19 +4297,6 @@ object DefaultCatalog {
             ),
             ApVendorOuis.COMPEX,
         ),
-    )
-
-    private fun novatelWireless() = Fleet(
-        id = "fleet-novatel",
-        name = "Novatel Wireless",
-        enabled = true,
-        colorIndex = Hue.LAW,
-        kind = SignatureClass.LAW_ENFORCEMENT,
-        matchAny = true,
-        notes = "Novatel Wireless / Inseego vehicle radio. The same prefix is also on some consumer MiFi hotspots.",
-        attentionNote = "Novatel Wireless / Inseego OUI 28:80:A2. Reported in public-safety vehicle AP work. Same prefix is also on some Inseego consumer MiFi radios. Pattern match, not that agency. Look with your eyes.",
-        builtIn = true,
-        rules = withWifiOuis(emptyList(), ApVendorOuis.NOVATEL),
     )
 
     private fun utilityInc() = Fleet(
@@ -4691,6 +5117,332 @@ object DefaultCatalog {
         ),
     )
 
+    private fun samsungTv() = Fleet(
+        id = "fleet-samsung-tv",
+        name = "Samsung TV",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Samsung TV or soundbar from the setup name. The name starts with [TV] or [AV], or it says QLED, The Frame, Crystal UHD, CU7000, or CU8000. Phones, watches, and buds share Samsung's company id, so this row uses the name.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("[TV]*"),
+            bleGlob("[AV]*"),
+            bleGlob("*QLED*"),
+            bleGlob("*The Frame*"),
+            bleGlob("*Crystal UHD*"),
+            bleGlob("*CU7000*"),
+            bleGlob("*CU8000*"),
+        ),
+    )
+
+    private fun googleCast() = Fleet(
+        id = "fleet-google-cast",
+        name = "Google Cast",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Google Cast display, speaker, or Chromecast on service FEA0. The room name is whatever the owner typed. Nest cameras stay on Nest.",
+        builtIn = true,
+        rules = listOf(bleUuid("FEA0")),
+    )
+
+    private fun levoit() = Fleet(
+        id = "fleet-levoit",
+        name = "Levoit",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Levoit air purifier. The name starts with LAP- or Core300. Espressif's company id is shared, so this row uses the name.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("LAP-*"),
+            bleGlob("Core300*"),
+        ),
+    )
+
+    private fun melk() = Fleet(
+        id = "fleet-melk",
+        name = "MELK",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "MELK lamp. The name starts with MELK-.",
+        builtIn = true,
+        rules = listOf(bleGlob("MELK-*")),
+    )
+
+    private fun midea() = Fleet(
+        id = "fleet-midea",
+        name = "Midea",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Midea air conditioner. The company id is Midea's. The advertisement name is often just net, and that word is not the rule.",
+        builtIn = true,
+        rules = listOf(bleMfg(0x06A8)),
+    )
+
+    private fun zebra() = Fleet(
+        id = "fleet-zebra",
+        name = "Zebra",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Zebra scanner or printer on service FE79.",
+        builtIn = true,
+        rules = listOf(bleUuid("FE79")),
+    )
+
+    private fun jlab() = Fleet(
+        id = "fleet-jlab",
+        name = "JLab",
+        enabled = true,
+        colorIndex = Hue.AUDIO,
+        kind = SignatureClass.AUDIO,
+        matchAny = true,
+        notes = "JLab earbuds. The company id is JLab's. A model can leave the JLab name off.",
+        builtIn = true,
+        rules = listOf(bleMfg(0x05D6)),
+    )
+
+    private fun scentAir() = Fleet(
+        id = "fleet-scentair",
+        name = "ScentAir",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "ScentAir diffuser. The company id is ScentAir's. The generic alert service is not the rule.",
+        builtIn = true,
+        rules = listOf(bleMfg(0x02E5)),
+    )
+
+    private fun escort() = Fleet(
+        id = "fleet-escort",
+        name = "Escort",
+        enabled = true,
+        colorIndex = Hue.VEHICLE,
+        kind = SignatureClass.VEHICLE,
+        matchAny = true,
+        notes = "Escort radar detector on service B5E22DE9.",
+        builtIn = true,
+        rules = listOf(bleUuid("B5E22DE9-31EE-42AB-BE6A-9BE0837AA344")),
+    )
+
+    private fun gardPro() = Fleet(
+        id = "fleet-gard-pro",
+        name = "Gard Pro",
+        enabled = true,
+        colorIndex = Hue.CAMERA,
+        kind = SignatureClass.CAMERA,
+        matchAny = true,
+        notes = "Gard Pro camera. The advertisement can spell Ultra as UItra.",
+        builtIn = true,
+        rules = listOf(bleGlob("Gard Pro*")),
+    )
+
+    private fun chb() = Fleet(
+        id = "fleet-chb",
+        name = "CHB",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.OTHER,
+        matchAny = true,
+        notes = "Bluetooth name starting with CHB2020. The product is not identified. Service FFA0 is shared by other modules, so this row uses the name.",
+        builtIn = true,
+        rules = listOf(bleGlob("CHB2020*")),
+    )
+
+    private fun vizio() = Fleet(
+        id = "fleet-vizio",
+        name = "Vizio",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Vizio TV or the Vizio app. The company id is Vizio's.",
+        builtIn = true,
+        rules = listOf(bleMfg(0x0058)),
+    )
+
+    private fun owlet() = Fleet(
+        id = "fleet-owlet",
+        name = "Owlet",
+        enabled = true,
+        colorIndex = Hue.HEALTH,
+        kind = SignatureClass.HEALTH,
+        matchAny = true,
+        notes = "Owlet baby monitor. Pattern match, not a patient.",
+        builtIn = true,
+        rules = listOf(bleUuid("C5163C4B-9B63-570D-A3A8-407716F04276")),
+    )
+
+    private fun tandem() = Fleet(
+        id = "fleet-tandem",
+        name = "Tandem",
+        enabled = true,
+        colorIndex = Hue.HEALTH,
+        kind = SignatureClass.HEALTH,
+        matchAny = true,
+        notes = "Tandem t:slim insulin pump. Pattern match, not a patient.",
+        builtIn = true,
+        rules = listOf(bleUuid("FDFB")),
+    )
+
+    private fun sleepTracker() = Fleet(
+        id = "fleet-sleeptracker",
+        name = "SleepTracker",
+        enabled = true,
+        colorIndex = Hue.HEALTH,
+        kind = SignatureClass.HEALTH,
+        matchAny = true,
+        notes = "Fullpower SleepTracker. Pattern match, not a patient.",
+        builtIn = true,
+        rules = listOf(bleGlob("SleepTracker*")),
+    )
+
+    private fun whoop() = Fleet(
+        id = "fleet-whoop",
+        name = "WHOOP",
+        enabled = true,
+        colorIndex = Hue.TRACKER,
+        kind = SignatureClass.WEARABLE,
+        matchAny = true,
+        notes = "WHOOP band. Pattern match, not a person.",
+        builtIn = true,
+        rules = listOf(bleGlob("WHOOP*")),
+    )
+
+    private fun soundcore() = Fleet(
+        id = "fleet-soundcore",
+        name = "soundcore",
+        enabled = true,
+        colorIndex = Hue.AUDIO,
+        kind = SignatureClass.AUDIO,
+        matchAny = true,
+        notes = "soundcore headphones.",
+        builtIn = true,
+        rules = listOf(bleGlob("soundcore*")),
+    )
+
+    private fun hume() = Fleet(
+        id = "fleet-hume",
+        name = "Hume",
+        enabled = true,
+        colorIndex = Hue.TRACKER,
+        kind = SignatureClass.WEARABLE,
+        matchAny = true,
+        notes = "Hume band. Pattern match, not a person.",
+        builtIn = true,
+        rules = listOf(bleGlob("Hume*")),
+    )
+
+    private fun platco() = Fleet(
+        id = "fleet-platco",
+        name = "Platco",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "Platco remote. The name is the rule. A shared remote company id and the generic alert service are not.",
+        builtIn = true,
+        rules = listOf(bleGlob("Platco*")),
+    )
+
+    private fun harpBt() = Fleet(
+        id = "fleet-harpbt",
+        name = "HarpBT",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.OTHER,
+        matchAny = true,
+        notes = "Bluetooth name starting with HarpBT. The product is not identified.",
+        builtIn = true,
+        rules = listOf(bleGlob("HarpBT*")),
+    )
+
+    private fun gt201() = Fleet(
+        id = "fleet-gt201",
+        name = "GT201",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.OTHER,
+        matchAny = true,
+        notes = "Bluetooth name starting with GT201. The product is not identified.",
+        builtIn = true,
+        rules = listOf(bleGlob("GT201*")),
+    )
+
+    private fun neewer() = Fleet(
+        id = "fleet-neewer",
+        name = "NEEWER",
+        enabled = true,
+        colorIndex = Hue.HOME_CAM,
+        kind = SignatureClass.HOME,
+        matchAny = true,
+        notes = "NEEWER light.",
+        builtIn = true,
+        rules = listOf(bleGlob("NEEWER*")),
+    )
+
+    private fun mai70() = Fleet(
+        id = "fleet-70mai",
+        name = "70mai",
+        enabled = true,
+        colorIndex = Hue.VEHICLE,
+        kind = SignatureClass.VEHICLE,
+        matchAny = true,
+        notes = "70mai dashcam.",
+        builtIn = true,
+        rules = listOf(glob("70mai*")),
+    )
+
+    private fun blackvue() = Fleet(
+        id = "fleet-blackvue",
+        name = "BlackVue",
+        enabled = true,
+        colorIndex = Hue.VEHICLE,
+        kind = SignatureClass.VEHICLE,
+        matchAny = true,
+        notes = "BlackVue dashcam.",
+        builtIn = true,
+        rules = listOf(glob("BlackVue*")),
+    )
+
+    private fun galaxyWatch() = Fleet(
+        id = "fleet-galaxy-watch",
+        name = "Galaxy Watch",
+        enabled = true,
+        colorIndex = Hue.TRACKER,
+        kind = SignatureClass.WEARABLE,
+        matchAny = true,
+        notes = "Samsung Galaxy Watch. Not a TV and not a SmartTag.",
+        builtIn = true,
+        rules = listOf(bleGlob("Galaxy Watch*")),
+    )
+
+    private fun galaxyBuds() = Fleet(
+        id = "fleet-galaxy-buds",
+        name = "Galaxy Buds",
+        enabled = true,
+        colorIndex = Hue.AUDIO,
+        kind = SignatureClass.AUDIO,
+        matchAny = true,
+        notes = "Samsung Galaxy Buds. A Buds FE can leave the word Galaxy off the name.",
+        builtIn = true,
+        rules = listOf(
+            bleGlob("Galaxy Buds*"),
+            bleGlob("Buds FE*"),
+        ),
+    )
+
     private fun oui(prefix: String) = MatchRule(RuleKind.OUI, text = prefix)
     private fun vendorIe(prefix: String) = MatchRule(RuleKind.VENDOR_IE_OUI, text = prefix)
     private fun name(text: String) = MatchRule(RuleKind.NAME_CONTAINS, text = text)
@@ -4719,7 +5471,11 @@ object DefaultCatalog {
     private fun withWifiOuis(base: List<MatchRule>, ouis: List<String>) =
         base + ouis.map { wifiOui(it) }
     private fun uuid(short: String) = MatchRule(RuleKind.SERVICE_UUID, text = short)
+    private fun bleUuid(short: String) =
+        MatchRule(RuleKind.SERVICE_UUID, text = short, radio = RadioKind.BLE)
     private fun mfg(id: Int) = MatchRule(RuleKind.MANUFACTURER_ID, companyId = id)
+    private fun bleMfg(id: Int) =
+        MatchRule(RuleKind.MANUFACTURER_ID, companyId = id, radio = RadioKind.BLE)
     private fun mfgData(id: Int, prefix: String) =
         MatchRule(RuleKind.MANUFACTURER_DATA, companyId = id, dataPrefixHex = prefix)
 

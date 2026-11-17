@@ -349,7 +349,8 @@ internal object CatalogDecodes {
     )
 
     /**
-     * Google Find Hub Network on FEAA. Frame 0x40 nearby, 0x41 separated.
+     * Google Find Hub Network on FEAA. Frame 0x40 is normal mode (protection off).
+     * Frame 0x41 is unwanted-tracking protection, shown as separated.
      * Next 20 or 32 bytes are the rotating EID (not a serial).
      */
     val findHub: FleetDecode = FleetDecode(
@@ -359,19 +360,46 @@ internal object CatalogDecodes {
             u8(
                 "mode", "Mode", 0,
                 enumLabels = mapOf(
-                    "64" to "nearby",
+                    "64" to "not separated",
                     "65" to "separated",
                 ),
                 live = true,
                 liveEmphasis = listOf("65"),
                 enumNotes = mapOf(
                     "65" to "Separated from its owner. The address can hold still for about a day.",
-                    "64" to "Nearby its owner. With you the whole sit, this is often your own tag. First heard after the sit started, it is more often someone who joined with their own keys.",
+                    "64" to "Normal mode, not flagged separated. The address keeps rotating. This frame does not say the tag is with its owner.",
                 ),
             ),
-            hex("eid", "Ephemeral ID", 1, length = 20),
+            hex("eid", "Ephemeral ID", 1, length = 20, gate = lenEq(21)),
+            hex("eid", "Ephemeral ID", 1, length = 20, gate = lenEq(22)),
+            hex("eid", "Ephemeral ID", 1, length = 32, gate = lenEq(33)),
+            hex("eid", "Ephemeral ID", 1, length = 32, gate = lenEq(34)),
+            findHubFlags(present = false, gate = lenEq(21)),
+            findHubFlags(present = true, gate = lenEq(22)),
+            findHubFlags(present = false, gate = lenEq(33)),
+            findHubFlags(present = true, gate = lenEq(34)),
         ),
     )
+
+    /**
+     * Presence only. The byte is XOR'd with a hash, so battery and the
+     * protection bit inside it are not readable. The length says whether
+     * the tag included it. The cleartext flag stays the frame type.
+     */
+    private fun findHubFlags(present: Boolean, gate: DecodeWhen): DecodeField {
+        val word = if (present) "present" else "not present"
+        val note = if (present) {
+            "Encrypted. This line only says the byte is in the advertisement."
+        } else {
+            "The tag left this byte out."
+        }
+        return u8(
+            "hashed_flags", "Hashed flags", 0,
+            enumLabels = mapOf("64" to word, "65" to word),
+            enumNotes = mapOf("64" to note, "65" to note),
+            gate = gate,
+        )
+    }
 
     /**
      * IETF DULT location-enabled advertisement on FCB2.
@@ -457,7 +485,7 @@ internal object CatalogDecodes {
 
     /**
      * Packed Location after the 0x0D app code and counter (opendroneid.c).
-     * Flags at offset 3: SpeedMult bit 0, EWDirection bit 1.
+     * Flags at offset 3: SpeedMult bit 0, EWDirection bit 1, HeightType bit 2.
      * Direction byte is 0–179; EWDirection adds 180. SpeedHorizontal is
      * value×0.25, or value×0.75 + 255×0.25 when SpeedMult is set.
      */
@@ -496,6 +524,13 @@ internal object CatalogDecodes {
         u16le("alt_baro", "Altitude (baro)", 15, scale = 0.5, offsetAdd = -1000.0, unit = "m"),
         u16le("alt_geo", "Altitude (HAE)", 17, scale = 0.5, offsetAdd = -1000.0, unit = "m"),
         u16le("height", "Height", 19, scale = 0.5, offsetAdd = -1000.0, unit = "m"),
+        bits(
+            "height_ref", "Height from", 3, bitOffset = 2, bitWidth = 1,
+            enumLabels = mapOf(
+                "0" to "Takeoff",
+                "1" to "Over ground",
+            ),
+        ),
     )
 
     private fun selfIdFields(): List<DecodeField> = listOf(
@@ -503,9 +538,50 @@ internal object CatalogDecodes {
     )
 
     private fun systemFields(): List<DecodeField> = listOf(
+        bits(
+            "op_loc_type", "Operator location", 3, bitOffset = 0, bitWidth = 2,
+            enumLabels = mapOf(
+                "0" to "Takeoff",
+                "1" to "Live GPS",
+                "2" to "Fixed",
+            ),
+            live = true,
+        ),
         i32le("op_lat", "Operator lat", 4, scale = 1e-7, unit = "°"),
         i32le("op_lon", "Operator lon", 8, scale = 1e-7, unit = "°"),
+        bits(
+            "eu_category", "EU category", 19, bitOffset = 4, bitWidth = 4,
+            enumLabels = mapOf(
+                "0" to "Undeclared",
+                "1" to "Open",
+                "2" to "Specific",
+                "3" to "Certified",
+            ),
+            gate = euClassification(),
+        ),
+        bits(
+            "eu_class", "EU class", 19, bitOffset = 0, bitWidth = 4,
+            enumLabels = mapOf(
+                "0" to "Undeclared",
+                "1" to "C0",
+                "2" to "C1",
+                "3" to "C2",
+                "4" to "C3",
+                "5" to "C4",
+                "6" to "C5",
+                "7" to "C6",
+            ),
+            gate = euClassification(),
+        ),
+        u16le(
+            "op_alt", "Operator altitude", 20,
+            scale = 0.5, offsetAdd = -1000.0, unit = "m",
+            gate = neq(20, "0000"),
+        ),
     )
+
+    /** Classification bits 2–4 equal 1 (EU). Bit 2 set, bits 3 and 4 clear. */
+    private fun euClassification(): DecodeWhen = mask(3, "04", nmask(3, "18"))
 
     private fun operatorIdFields(): List<DecodeField> = listOf(
         utf8("operator_id", "Operator ID", 4, length = 20),
