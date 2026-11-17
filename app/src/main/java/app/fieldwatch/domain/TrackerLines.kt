@@ -4,6 +4,7 @@ package app.fieldwatch.domain
 internal object TrackerLines {
     val all: List<EnglishLine> = listOf(
         en("settings.topic.tracker", "Tracker monitoring", LanguageSlot.CONTROL),
+        en("settings.topic.station", "sw33p3r_ Station", LanguageSlot.CONTROL),
         en("tracker.follow", "Separated tag with you", LanguageSlot.CONTROL),
         en(
             "tracker.follow.note",
