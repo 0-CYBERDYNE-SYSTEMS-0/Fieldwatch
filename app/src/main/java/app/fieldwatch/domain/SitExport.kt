@@ -158,11 +158,11 @@ object SitExport {
     }
 
     fun subject(kind: LogExportKind, sitName: String): String = when (kind) {
-        LogExportKind.LOG_CSV -> "Fieldwatch sit $sitName (CSV)"
-        LogExportKind.LOG_JSONL -> "Fieldwatch sit $sitName (JSON lines)"
-        LogExportKind.GPX -> "Fieldwatch sit $sitName (GPX)"
-        LogExportKind.KML -> "Fieldwatch sit $sitName (KML)"
-        LogExportKind.WIGLE -> "Fieldwatch sit $sitName (WiGLE CSV)"
+        LogExportKind.LOG_CSV -> "sw33p3r_ sit $sitName (CSV)"
+        LogExportKind.LOG_JSONL -> "sw33p3r_ sit $sitName (JSON lines)"
+        LogExportKind.GPX -> "sw33p3r_ sit $sitName (GPX)"
+        LogExportKind.KML -> "sw33p3r_ sit $sitName (KML)"
+        LogExportKind.WIGLE -> "sw33p3r_ sit $sitName (WiGLE CSV)"
     }
 
     fun emptyHint(kind: LogExportKind, radios: LogExportRadios): String {

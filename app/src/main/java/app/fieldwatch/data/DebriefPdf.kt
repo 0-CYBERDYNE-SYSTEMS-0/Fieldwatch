@@ -1230,7 +1230,7 @@ object DebriefPdf {
             isAntiAlias = true
             letterSpacing = 0.12f
         }
-        canvas.drawText("FIELDWATCH", MARGIN, 26f, title)
+        canvas.drawText("sw33p3r_", MARGIN, 26f, title)
         val sub = Paint().apply {
             color = Color.parseColor("#C8D0D8")
             textSize = 9f
@@ -1250,7 +1250,7 @@ object DebriefPdf {
             textSize = 8f
             isAntiAlias = true
         }
-        canvas.drawText("Off Grid Pete LLC  ·  operationally sensitive", MARGIN, PAGE_H - 18f, f)
+        canvas.drawText("sw33p3r_  ·  operationally sensitive", MARGIN, PAGE_H - 18f, f)
         val pn = "$page / $total"
         canvas.drawText(pn, PAGE_W - MARGIN - f.measureText(pn), PAGE_H - 18f, f)
     }

@@ -524,7 +524,7 @@ class TakPublishTest {
     @Test
     fun selfMarkerCarriesTheGnssLineAndNoCoordinatesInRemarks() {
         val plain = CotEvent.selfXml(40.0, -74.0, 0L)
-        assertTrue(plain.contains("Fieldwatch TAK heartbeat (this phone)"))
+        assertTrue(plain.contains("sw33p3r_ TAK heartbeat (this phone)"))
         assertFalse(plain.contains("GNSS"))
         val xml = CotEvent.selfXml(40.0, -74.0, 0L, remarksExtra = "Possible GNSS interference · Medium")
         assertTrue(xml.contains("Possible GNSS interference · Medium"))

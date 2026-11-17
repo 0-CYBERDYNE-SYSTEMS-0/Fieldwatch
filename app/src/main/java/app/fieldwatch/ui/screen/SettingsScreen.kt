@@ -9,7 +9,6 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,25 +22,23 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import app.fieldwatch.ui.component.FieldwatchFilterChip
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import app.fieldwatch.ui.component.FieldwatchActionButton
 import app.fieldwatch.ui.component.FieldwatchOutlinedField
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import app.fieldwatch.ui.component.FieldwatchSlider
-import androidx.compose.material3.Surface
 import app.fieldwatch.ui.component.FieldwatchSwitch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,9 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import app.fieldwatch.R
@@ -139,7 +134,7 @@ fun SettingsScreen(
                 FieldwatchSwitch(settings.keepScreenOn, { on -> vm.updateSettings { it.copy(keepScreenOn = on) } })
             }
             Text(
-                "The screen stays awake while Fieldwatch is open, so Bluetooth keeps scanning. The scan still runs from the notification if you leave the app. Turn this off when you pocket the phone.",
+                "The screen stays awake while sw33p3r_ is open, so Bluetooth keeps scanning. The scan still runs from the notification if you leave the app. Turn this off when you pocket the phone.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -210,13 +205,13 @@ fun SettingsScreen(
             StableCaption(
                 when {
                     Build.VERSION.SDK_INT < 30 ->
-                        "This phone is older than Android 11, so Fieldwatch cannot tell if Wi-Fi scan throttling is on. The switch stays off."
+                        "This phone is older than Android 11, so sw33p3r_ cannot tell if Wi-Fi scan throttling is on. The switch stays off."
                     !osThrottled ->
                         "On. A new access-point list about every 8 seconds. Uses more battery. This matches Wi-Fi scan throttling in Developer options."
                     else ->
                         "Off. Android is limiting Wi-Fi scans to about four per two minutes. Tap the switch to open Developer options."
                 },
-                "This phone is older than Android 11, so Fieldwatch cannot tell if Wi-Fi scan throttling is on. The switch stays off.",
+                "This phone is older than Android 11, so sw33p3r_ cannot tell if Wi-Fi scan throttling is on. The switch stays off.",
                 "On. A new access-point list about every 8 seconds. Uses more battery. This matches Wi-Fi scan throttling in Developer options.",
                 "Off. Android is limiting Wi-Fi scans to about four per two minutes. Tap the switch to open Developer options.",
             )
@@ -227,11 +222,11 @@ fun SettingsScreen(
                     text = {
                         Text(
                             if (Build.VERSION.SDK_INT < 30) {
-                                "This phone is older than Android 11, so Fieldwatch cannot tell if Wi-Fi scan throttling is on. Faster scanning stays off."
+                                "This phone is older than Android 11, so sw33p3r_ cannot tell if Wi-Fi scan throttling is on. Faster scanning stays off."
                             } else if (osThrottled) {
-                                "This opens Developer options. Turn Wi-Fi scan throttling off. Fieldwatch matches that switch when you come back."
+                                "This opens Developer options. Turn Wi-Fi scan throttling off. sw33p3r_ matches that switch when you come back."
                             } else {
-                                "This opens Developer options. Turn Wi-Fi scan throttling on to use the normal wait. Fieldwatch matches that switch when you come back."
+                                "This opens Developer options. Turn Wi-Fi scan throttling on to use the normal wait. sw33p3r_ matches that switch when you come back."
                             },
                         )
                     },
@@ -290,9 +285,9 @@ fun SettingsScreen(
                     text = {
                         Text(
                             if (background) {
-                                "This opens Fieldwatch’s battery page. Turn on Allow background usage. Fieldwatch matches it when you come back."
+                                "This opens sw33p3r_’s battery page. Turn on Allow background usage. sw33p3r_ matches it when you come back."
                             } else {
-                                "Choose Unrestricted. On some phones, including Samsung, tap the words Allow background usage, then choose Unrestricted. Fieldwatch matches it when you come back."
+                                "Choose Unrestricted. On some phones, including Samsung, tap the words Allow background usage, then choose Unrestricted. sw33p3r_ matches it when you come back."
                             },
                         )
                     },
@@ -430,7 +425,7 @@ fun SettingsScreen(
             }
             Text(
                 "With internet, Debrief turns coordinates into a street and city, and Reports → Path loads a map under the trace. " +
-                    "Nothing is sent to a Fieldwatch server. " +
+                    "Nothing is sent to a sw33p3r_ server. " +
                     "Offline, Debrief keeps the coordinates and Path stays a plain trace. " +
                     "Turn this off to leave streets and the map out.",
                 style = MaterialTheme.typography.bodySmall,
@@ -452,7 +447,7 @@ fun SettingsScreen(
             Text(
                 "Detects interference and spoofing of GNSS (GPS) satellites. " +
                     "Interference can also be caused by other nearby electronics, such as Wi-Fi routers. " +
-                    "Fieldwatch cannot tell the source or the distance. " +
+                    "sw33p3r_ cannot tell the source or the distance. " +
                     "A hit already under way when the check starts can be missed. " +
                     "A hit opens a popup. After you dismiss it, a red line stays on Live until it ends.",
                 style = MaterialTheme.typography.bodySmall,
@@ -623,6 +618,24 @@ fun SettingsScreen(
             }
             }
 
+            SectionCard("sw33p3r_ Station") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Station feed", Modifier.weight(1f))
+                FieldwatchSwitch(settings.stationEnabled, { on -> vm.updateSettings { it.copy(stationEnabled = on) } })
+            }
+            Text(
+                "Off by default. Sends every hear (MAC, name, RSSI, channel, signature class) and this phone's GPS fix " +
+                    "as JSON to a sw33p3r_ Station once a second. At the desk: plug in USB, run " +
+                    "`adb reverse tcp:8741 tcp:8741` on the station, and keep the default URL. " +
+                    "Nothing else is sent anywhere. Privacy mode pauses the feed.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (settings.stationEnabled) {
+                StationFeedSettings(settings, vm)
+            }
+            }
+
             SectionCard("Logging") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Write detections to disk", Modifier.weight(1f))
@@ -689,7 +702,7 @@ fun SettingsScreen(
 
             SectionCard("Signatures") {
             Text(
-                "Export shares the catalog, including signatures you added. Import adds rows and does not delete any. Update from GitHub refreshes the stock signatures and leaves yours, your bookmarks, and your settings. It needs internet. Restore defaults deletes the signatures you added.",
+                "Export the catalog (stock plus any you added or edited) to share with another sw33p3r_ or as a backup. Import adds new rows and extra rules; it does not delete anything. Same id or the same match rules are skipped so a pack can be imported twice. Import signatures from a file to add a catalog received out of band. Restore defaults below still wipes customs.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -707,11 +720,6 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Import signatures…") }
-            FieldwatchActionButton(
-                onClick = vm::updateStockCatalogFromGitHub,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Update stock catalog from GitHub") }
-
             FieldwatchActionButton(
                 onClick = { confirmRestore = true },
                 modifier = Modifier.fillMaxWidth(),
@@ -764,7 +772,7 @@ fun SettingsScreen(
             )
 
             Text(
-                "Fieldwatch ${app.fieldwatch.BuildConfig.VERSION_NAME}  ·  Catalog ${state.catalogVersion}",
+                "sw33p3r_ ${app.fieldwatch.BuildConfig.VERSION_NAME}  ·  Catalog ${state.catalogVersion}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -837,7 +845,6 @@ fun SettingsScreen(
 
 @Composable
 private fun CreditFooter() {
-    val context = LocalContext.current
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = Modifier
@@ -847,55 +854,10 @@ private fun CreditFooter() {
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Text(
-            "Copyright (c) 2026 Off Grid Pete LLC. All rights reserved.",
+            "sw33p3r_",
             style = MaterialTheme.typography.labelSmall,
             color = muted,
         )
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            SocialChip(
-                icon = R.drawable.ic_instagram,
-                label = "@OffGridPete",
-                tint = muted,
-                onClick = { openUrl(context, "https://instagram.com/OffGridPete") },
-            )
-            SocialChip(
-                icon = R.drawable.ic_x,
-                label = "@OGridPete",
-                tint = muted,
-                onClick = { openUrl(context, "https://x.com/OGridPete") },
-            )
-        }
-    }
-}
-
-@Composable
-private fun SocialChip(
-    icon: Int,
-    label: String,
-    tint: Color,
-    onClick: () -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(99.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f),
-        modifier = Modifier.clickable(onClick = onClick),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                painter = painterResource(icon),
-                contentDescription = label,
-                tint = tint,
-                modifier = Modifier.size(14.dp),
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(label, style = MaterialTheme.typography.labelMedium, color = tint)
-        }
     }
 }
 
@@ -1052,6 +1014,48 @@ private fun TakFeedSettings(settings: AppSettings, vm: FieldwatchViewModel, stat
         style = MaterialTheme.typography.bodySmall,
         color = muted,
     )
+}
+
+@Composable
+private fun StationFeedSettings(settings: AppSettings, vm: FieldwatchViewModel) {
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    val status by vm.stationStatus.collectAsState()
+    var urlText by remember { mutableStateOf(settings.stationUrl) }
+    var idText by remember { mutableStateOf(settings.stationSensorId) }
+    LaunchedEffect(settings.stationUrl) { urlText = settings.stationUrl }
+    LaunchedEffect(settings.stationSensorId) { idText = settings.stationSensorId }
+    FieldwatchOutlinedField(
+        value = urlText,
+        onValueChange = { value ->
+            urlText = value
+            val trimmed = value.trim()
+            if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+                vm.updateSettings { it.copy(stationUrl = trimmed) }
+            }
+        },
+        label = "Station URL",
+        placeholder = app.fieldwatch.radio.StationDefaults.URL,
+        enabled = !settings.demoMode,
+    )
+    FieldwatchOutlinedField(
+        value = idText,
+        onValueChange = { value ->
+            idText = value
+            vm.updateSettings { it.copy(stationSensorId = value.trim()) }
+        },
+        label = "Sensor id",
+        placeholder = app.fieldwatch.radio.StationDefaults.sensorId(),
+        enabled = !settings.demoMode,
+    )
+    Text(stationStatusLine(status), style = MaterialTheme.typography.bodySmall, color = muted)
+}
+
+private fun stationStatusLine(status: app.fieldwatch.radio.StationFeedStatus): String {
+    if (status.paused) return "Feed status  ·  paused (Privacy mode)"
+    val whenAt = takStatusWhen(status.at)
+    if (status.error != null) return "Feed status  ·  ${status.error}" + if (whenAt.isNotEmpty()) "  ·  $whenAt" else ""
+    if (status.at <= 0L) return "Feed status  ·  no send yet (start scanning)"
+    return "Feed status  ·  ${status.batches} batches  ·  last ${status.sent} hears  ·  $whenAt"
 }
 
 private fun takStatusLine(status: TakFeedStatus): String {

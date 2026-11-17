@@ -96,7 +96,7 @@ data class DebriefDoc(
     val takeaway: String,
     val sections: List<DebriefSection>,
     val extraAttention: List<ExtraAttentionHit> = emptyList(),
-    val heading: String = "FIELDWATCH FIELD DEBRIEF",
+    val heading: String = "sw33p3r_ FIELD DEBRIEF",
     val pdfKicker: String = "FIELD DEBRIEF",
     val pdfTitle: String = "Field debrief",
     val pathFigure: SitPathPlot.Figure? = null,
@@ -469,7 +469,7 @@ object DebriefReport {
                         trackerCallout(
                             "Finder tags (AirTag / Find My, SmartTag, Tile, Chipolo, Pebblebee) and loud pocket Apple BLE. " +
                                 "These radios stayed with your GPS path for this sit. " +
-                                "Fieldwatch cannot tell your own tag or phone from a tracker planted in the car, bag, or on you before you started. " +
+                                "sw33p3r_ cannot tell your own tag or phone from a tracker planted in the car, bag, or on you before you started. " +
                                 "Account for each MAC. Not a finding and not identity.",
                             wholeSit,
                             customNames,
@@ -573,16 +573,16 @@ object DebriefReport {
             "last 15 minutes (${utc(windowStart)} → ${utc(windowEnd)} UTC)"
         }
         val heading = if (win.sitName != null) {
-            "FIELDWATCH SIT — ${win.sitName}"
+            "sw33p3r_ SIT — ${win.sitName}"
         } else {
-            "FIELDWATCH FIELD DEBRIEF"
+            "sw33p3r_ FIELD DEBRIEF"
         }
         val meta = buildList {
             add("Generated" to "${utc(now)} UTC")
             if (win.sitName != null) add("Sit" to win.sitName)
             add("Window" to windowLine)
             add("Radios" to "${inWin.size}")
-            add("Tool" to "Fieldwatch (app.fieldwatch) · stock Android · receive-only Wi-Fi AP + BLE advertiser")
+            add("Tool" to "sw33p3r_ (app.fieldwatch) · stock Android · receive-only Wi-Fi AP + BLE advertiser")
             add("Scan" to "${settings.intensity.name.lowercase()} · stale ${settings.staleSec}s · brief hold ${settings.decaySec}s")
             add("GPS tag" to if (settings.tagLocation) "on" else "off")
             add("Distance" to distanceLine)
@@ -965,7 +965,7 @@ object DebriefReport {
         } else {
             "In the last 15 minutes"
         }
-        append("$whenPhrase Fieldwatch heard ${wifi.size} Wi-Fi access points and ${ble.size} BLE advertisers")
+        append("$whenPhrase sw33p3r_ heard ${wifi.size} Wi-Fi access points and ${ble.size} BLE advertisers")
         append(" (${named.size} signature-matched")
         if (mineHeard > 0) append(", $mineHeard marked mine")
         append(", ${hidden.size} hidden SSIDs, $randomized randomized BLE). ")
@@ -991,7 +991,7 @@ object DebriefReport {
                     append(following.joinToString { trackId(it) })
                     append(". ")
                 }
-                append("Account for every MAC — Fieldwatch cannot tell yours from a plant. ")
+                append("Account for every MAC — sw33p3r_ cannot tell yours from a plant. ")
             }
             !settings.tagLocation -> {
                 append("GPS tagging is off, so a following test was not performed. Enable “Tag detections with GPS” and walk to test. ")
@@ -1024,7 +1024,7 @@ object DebriefReport {
         wearablesWithYou: List<FollowHit>,
     ): String = buildString {
         if (!settings.tagLocation) {
-            appendLine("GPS tagging is OFF. Fieldwatch cannot test whether a radio moved with you.")
+            appendLine("GPS tagging is OFF. sw33p3r_ cannot test whether a radio moved with you.")
             appendLine("Turn on Settings → Tag detections with GPS, walk or drive 50+ m, then run Debrief again.")
             return@buildString
         }
@@ -1456,7 +1456,7 @@ object DebriefReport {
         if (!settings.tagLocation) add("Enable Tag detections with GPS and walk 50+ m, then run Debrief again for a following test.")
         else if (pathSpan < MOVE_M) add("Walk farther (50+ m) with GPS tagging on, then re-run Debrief.")
         add("Use Live → Pause to inspect a busy list. Watch tracker signatures if this sit was noisy.")
-        add("Station-side Wi-Fi (probes/clients) still needs a dedicated sniffer — Fieldwatch cannot see them.")
+        add("Station-side Wi-Fi (probes/clients) still needs a dedicated sniffer — sw33p3r_ cannot see them.")
     }
 
     private fun takeaway(

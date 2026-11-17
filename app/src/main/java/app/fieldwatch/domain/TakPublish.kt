@@ -494,8 +494,8 @@ object CotEvent {
         lat = lat,
         lon = lon,
         hae = 9999999.0,
-        callsign = "Fieldwatch",
-        remarks = "Fieldwatch · gone",
+        callsign = "sw33p3r_",
+        remarks = "sw33p3r_ · gone",
         group = "Cyan",
         now = now,
         staleMs = 0L,
@@ -512,7 +512,7 @@ object CotEvent {
         remarksExtra: String? = null,
     ): String {
         val remarks = buildString {
-            append("Fieldwatch TAK heartbeat (this phone)")
+            append("sw33p3r_ TAK heartbeat (this phone)")
             val extra = remarksExtra?.trim().orEmpty()
             if (extra.isNotEmpty()) {
                 append('\n')
@@ -525,7 +525,7 @@ object CotEvent {
             lat = lat,
             lon = lon,
             hae = 9999999.0,
-            callsign = "Fieldwatch",
+            callsign = "sw33p3r_",
             remarks = xmlEscape(remarks),
             group = "Cyan",
             now = now,

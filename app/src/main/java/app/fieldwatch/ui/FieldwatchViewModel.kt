@@ -20,7 +20,6 @@ import app.fieldwatch.domain.attentionNotes
 import app.fieldwatch.domain.signatureNotes
 import app.fieldwatch.domain.detectionPolicy
 import app.fieldwatch.domain.gnssSettings
-import app.fieldwatch.data.CatalogRemote
 import app.fieldwatch.data.DebriefPdf
 import app.fieldwatch.data.PathTiles
 import app.fieldwatch.data.PlaceLookup
@@ -120,7 +119,7 @@ data class ExportUi(
     val spinner: Boolean = false,
     val message: String = "",
     val share: Intent? = null,
-    val shareTitle: String = "Export Fieldwatch logs",
+    val shareTitle: String = "Export sw33p3r_ logs",
     val error: String? = null,
     val errorTitle: String? = null,
     val cleared: Boolean = false,
@@ -164,6 +163,7 @@ data class FieldwatchUi(
 
 class FieldwatchViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as FieldwatchApp
+    val stationStatus: kotlinx.coroutines.flow.StateFlow<app.fieldwatch.radio.StationFeedStatus> = app.station.status
     private val filters = FilterEngine()
     private val signatures = SignatureEngine()
     private val selectedKey = MutableStateFlow<String?>(null)
@@ -914,8 +914,8 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun compareSubject(doc: DebriefDoc): String =
-        if (doc.windowLine.isNotBlank()) "Fieldwatch sit compare — ${doc.windowLine}"
-        else "Fieldwatch sit compare"
+        if (doc.windowLine.isNotBlank()) "sw33p3r_ sit compare — ${doc.windowLine}"
+        else "sw33p3r_ sit compare"
 
     fun startSitCompareAiExport() {
         if (_export.value.active) return
@@ -931,7 +931,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "text/plain"
                     putExtra(
                         Intent.EXTRA_SUBJECT,
-                        "Fieldwatch sit compare AI export — ${thisSide.name} vs ${second.name}",
+                        "sw33p3r_ sit compare AI export — ${thisSide.name} vs ${second.name}",
                     )
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
@@ -1375,11 +1375,11 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "application/json"
                     clipData = ClipData.newRawUri("signatures", uri)
                     putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, "Fieldwatch signatures")
+                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ signatures")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }.onSuccess { intent ->
-                _export.value = ExportUi(share = intent, shareTitle = "Fieldwatch signatures")
+                _export.value = ExportUi(share = intent, shareTitle = "sw33p3r_ signatures")
             }.onFailure { err ->
                 _export.value = ExportUi(
                     error = err.message ?: "Could not export signatures",
@@ -1401,95 +1401,13 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
             }.onSuccess {
                 _export.value = ExportUi(
                     noticeTitle = "Signatures saved",
-                    noticeMessage = "The pack was written to the folder you picked. Share it with another Fieldwatch or keep it as a backup before Restore defaults.",
+                    noticeMessage = "The pack was written to the folder you picked. Share it with another sw33p3r_ or keep it as a backup before Restore defaults.",
                 )
             }.onFailure { err ->
                 _export.value = ExportUi(
                     error = err.message ?: "Could not save signatures",
                     errorTitle = "Could not save signatures",
                 )
-            }
-        }
-    }
-
-    fun updateStockCatalogFromGitHub() {
-        if (_export.value.active) return
-        viewModelScope.launch {
-            if (!PlaceLookup.online(app)) {
-                _export.value = ExportUi(
-                    errorTitle = "No internet",
-                    error = "No internet. Use Import signatures from a file.",
-                )
-                return@launch
-            }
-            _export.value = ExportUi(
-                active = true,
-                spinner = true,
-                message = "Updating stock catalog…",
-            )
-            runCatching {
-                val text = withContext(Dispatchers.IO) {
-                    CatalogRemote.fetch(
-                        userAgent = "Fieldwatch/${BuildConfig.VERSION_NAME}",
-                    )
-                }
-                val parsed = SignatureExchange.parsePack(text)
-                val result = app.config.overlayStockCatalog(parsed.pack)
-                    .copy(skippedDecode = parsed.skippedDecode)
-                result.error?.let { throw IllegalStateException(it) }
-                if (!result.alreadyLatest) {
-                    app.devices.refresh(
-                        app.config.fleets,
-                        app.config.settings.staleSec,
-                        policy = app.config.settings.detectionPolicy(),
-                        decaySec = app.config.settings.decaySec,
-                    )
-                }
-                result
-            }.onSuccess { result ->
-                _export.value = if (result.alreadyLatest) {
-                    ExportUi(
-                        noticeTitle = "Already on the latest catalog",
-                        noticeMessage = "Already on catalog ${result.catalogVersion}. Nothing to update.",
-                    )
-                } else {
-                    val bits = mutableListOf<String>()
-                    if (result.updated > 0) bits += "updated ${result.updated}"
-                    if (result.added > 0) bits += "added ${result.added}"
-                    val change = if (bits.isEmpty()) "No stock rows changed."
-                    else bits.joinToString(" · ").replaceFirstChar { it.uppercase() } + "."
-                    val skip = result.skippedDecode > 0
-                    ExportUi(
-                        noticeTitle = "Catalog updated",
-                        noticeMessage = "Stock catalog is now ${result.catalogVersion}. $change " +
-                            "Bookmarks and Settings were not changed.",
-                        followUpTitle = if (skip) "Signature decoding skipped" else null,
-                        followUpMessage = if (skip) {
-                            "Some signature field maps in this catalog need a newer Fieldwatch. " +
-                                "Signatures still match. Install a newer APK to decode those fields."
-                        } else {
-                            null
-                        },
-                    )
-                }
-            }.onFailure { err ->
-                val msg = err.message.orEmpty()
-                val access = msg.contains("HTTP", ignoreCase = true) ||
-                    msg.contains("Unable to resolve", ignoreCase = true) ||
-                    msg.contains("failed to connect", ignoreCase = true) ||
-                    msg.contains("timeout", ignoreCase = true) ||
-                    msg.contains("GitHub", ignoreCase = true)
-                _export.value = if (access) {
-                    ExportUi(
-                        errorTitle = "Could not reach GitHub",
-                        error = "Could not reach the catalog on GitHub. Try again later, or use Import signatures from a file.",
-                    )
-                } else {
-                    ExportUi(
-                        errorTitle = "Could not import catalog",
-                        error = err.message ?: "Could not import catalog.",
-                    )
-                }
             }
         }
     }
@@ -1559,11 +1477,11 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "application/json"
                     clipData = ClipData.newRawUri("settings", uri)
                     putExtra(Intent.EXTRA_STREAM, uri)
-                    putExtra(Intent.EXTRA_SUBJECT, "Fieldwatch settings")
+                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ settings")
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
             }.onSuccess { intent ->
-                _export.value = ExportUi(share = intent, shareTitle = "Fieldwatch settings")
+                _export.value = ExportUi(share = intent, shareTitle = "sw33p3r_ settings")
             }.onFailure { err ->
                 _export.value = ExportUi(
                     error = err.message ?: "Could not export settings",
@@ -1920,7 +1838,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun debriefSubject(doc: DebriefDoc): String =
-        if (doc.heading.startsWith("FIELDWATCH SIT")) doc.heading else "Fieldwatch field debrief — last 15 minutes"
+        if (doc.heading.startsWith("sw33p3r_ SIT")) doc.heading else "sw33p3r_ field debrief — last 15 minutes"
 
     private suspend fun fieldDebriefDoc(): DebriefDoc {
         publishExport(0.08f, "Gathering sit…")
@@ -2024,8 +1942,8 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                     type = "text/plain"
                     putExtra(
                         Intent.EXTRA_SUBJECT,
-                        if (window != null) "Fieldwatch AI export — sit ${window.sitName}"
-                        else "Fieldwatch AI export — last 15 minutes",
+                        if (window != null) "sw33p3r_ AI export — sit ${window.sitName}"
+                        else "sw33p3r_ AI export — last 15 minutes",
                     )
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
@@ -2091,7 +2009,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 )
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, "Fieldwatch AI export — $title")
+                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ AI export — $title")
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
             }.onSuccess { intent ->
@@ -2141,7 +2059,7 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
                 )
                 Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
-                    putExtra(Intent.EXTRA_SUBJECT, "Fieldwatch device detail — $title")
+                    putExtra(Intent.EXTRA_SUBJECT, "sw33p3r_ device detail — $title")
                     putExtra(Intent.EXTRA_TEXT, text)
                 }
             }.onSuccess { intent ->
@@ -2340,11 +2258,11 @@ class FieldwatchViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private fun exportSubject(kind: LogExportKind): String = when (kind) {
-        LogExportKind.LOG_CSV -> "Fieldwatch log (CSV)"
-        LogExportKind.LOG_JSONL -> "Fieldwatch log (JSON lines)"
-        LogExportKind.GPX -> "Fieldwatch GPX"
-        LogExportKind.KML -> "Fieldwatch KML"
-        LogExportKind.WIGLE -> "Fieldwatch WiGLE CSV"
+        LogExportKind.LOG_CSV -> "sw33p3r_ log (CSV)"
+        LogExportKind.LOG_JSONL -> "sw33p3r_ log (JSON lines)"
+        LogExportKind.GPX -> "sw33p3r_ GPX"
+        LogExportKind.KML -> "sw33p3r_ KML"
+        LogExportKind.WIGLE -> "sw33p3r_ WiGLE CSV"
     }
 
     private suspend fun writeMapExport(kind: LogExportKind, radios: LogExportRadios): File {

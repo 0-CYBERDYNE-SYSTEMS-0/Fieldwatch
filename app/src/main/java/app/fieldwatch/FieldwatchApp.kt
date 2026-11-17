@@ -26,6 +26,7 @@ import app.fieldwatch.domain.RadioDb
 import app.fieldwatch.domain.RadioKind
 import app.fieldwatch.domain.Sighting
 import app.fieldwatch.radio.ScanService
+import app.fieldwatch.radio.StationPublisher
 import app.fieldwatch.radio.TakPublisher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +50,8 @@ class FieldwatchApp : Application() {
     lateinit var alerter: Alerter
         private set
     lateinit var tak: TakPublisher
+        private set
+    lateinit var station: StationPublisher
         private set
     val pairingFlood = PairingFlood()
     val wifiFlood = WifiBeaconFlood()
@@ -76,6 +79,9 @@ class FieldwatchApp : Application() {
 
     @Volatile
     var lastFix: Pair<Double, Double>? = null
+    /** Horizontal accuracy of [lastFix] in meters, when the fix reported one. */
+    @Volatile
+    var lastFixAccuracyM: Float? = null
     @Volatile
     var lastFixAt: Long = 0L
     @Volatile
@@ -98,6 +104,7 @@ class FieldwatchApp : Application() {
         sits = SitStore(this, scope)
         alerter = Alerter(this)
         tak = TakPublisher()
+        station = StationPublisher()
         gnssProfile = GnssProfileStore(this)
         gnss = GnssMonitor(this)
         runBlocking {
@@ -335,6 +342,7 @@ class FieldwatchApp : Application() {
         val age = System.currentTimeMillis() - loc.time
         if (age > 30_000L) return
         lastFix = loc.latitude to loc.longitude
+        lastFixAccuracyM = if (loc.hasAccuracy()) loc.accuracy else null
         lastFixAt = loc.time
         if (loc.hasSpeed() && loc.speed >= 0f && loc.speed.isFinite()) {
             val loose = loc.hasSpeedAccuracy() && loc.speedAccuracyMetersPerSecond > 4f

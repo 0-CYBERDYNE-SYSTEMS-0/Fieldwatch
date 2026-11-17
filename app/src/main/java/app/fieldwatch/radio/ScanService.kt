@@ -283,6 +283,7 @@ class ScanService : LifecycleService() {
                 selfFix = app.lastFix,
                 gnssRemark = phoneNote,
             )
+            app.station.publish(live, fleets, settings, app.lastFix, app.lastFixAccuracyM)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -335,7 +336,7 @@ class ScanService : LifecycleService() {
         )
         return NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_fieldwatch)
-            .setContentTitle("Fieldwatch scanning")
+            .setContentTitle("sw33p3r_ scanning")
             .setContentText(text)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -370,6 +371,7 @@ class ScanService : LifecycleService() {
         runCatching { wifi.stop() }
         runCatching { ble.stop() }
         runCatching { (application as FieldwatchApp).tak.close() }
+        runCatching { (application as FieldwatchApp).station.close() }
         val app = application as FieldwatchApp
         app.devices.setScanning(false)
         app.gnss.stop()

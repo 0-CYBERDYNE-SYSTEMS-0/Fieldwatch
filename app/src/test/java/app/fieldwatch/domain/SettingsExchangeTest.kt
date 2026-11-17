@@ -207,7 +207,7 @@ class SettingsExchangeTest {
             SettingsExchange.parse("{\"version\":68,\"fleets\":[]}")
             throw AssertionError("expected parse to fail")
         } catch (e: IllegalArgumentException) {
-            assertTrue(e.message!!.contains("Not a Fieldwatch settings pack"))
+            assertTrue(e.message!!.contains("Not a sw33p3r_ settings pack"))
         }
     }
 

@@ -834,7 +834,7 @@ object DefaultCatalog {
         colorIndex = Hue.AUDIO,
         kind = SignatureClass.AUDIO,
         matchAny = true,
-        notes = "Sony headphones, TV, or camera. Bravia TVs also send a generic iBeacon for Cast — Fieldwatch keeps Sony.",
+        notes = "Sony headphones, TV, or camera. Bravia TVs also send a generic iBeacon for Cast — sw33p3r_ keeps Sony.",
         builtIn = true,
         rules = listOf(
             mfg(0x012D),
@@ -2515,7 +2515,7 @@ object DefaultCatalog {
         colorIndex = Hue.MESH,
         kind = SignatureClass.MESH,
         matchAny = true,
-        notes = "goTenna Mesh or Pro companion radio. Pairs over BLE; the mesh itself is UHF and Fieldwatch cannot hear it. Pro is sold to agencies. Pattern match, not that operator.",
+        notes = "goTenna Mesh or Pro companion radio. Pairs over BLE; the mesh itself is UHF and sw33p3r_ cannot hear it. Pro is sold to agencies. Pattern match, not that operator.",
         builtIn = true,
         rules = listOf(
             uuid("1276aaee-df5e-11e6-bf01-fe55135034f3"),
@@ -2587,7 +2587,7 @@ object DefaultCatalog {
         colorIndex = Hue.SURVEILLANCE,
         kind = SignatureClass.SURVEILLANCE,
         matchAny = true,
-        notes = "Iteris roadside Bluetooth travel-time reader (Vantage Velocity, now BlueTOAD Spectra / Spectra CV). Samples phones, headsets, and in-car Bluetooth as vehicles pass; matching the same ID at two points gives speed. About 100 m. A sample, not a full count. Quiet or Ethernet-only cabinets may not advertise. Spectra CV also uses 5.9 GHz C-V2X, which Fieldwatch cannot hear. IEEE Iteris OUI can also hit other Iteris roadside kit. Pattern match, not that cabinet.",
+        notes = "Iteris roadside Bluetooth travel-time reader (Vantage Velocity, now BlueTOAD Spectra / Spectra CV). Samples phones, headsets, and in-car Bluetooth as vehicles pass; matching the same ID at two points gives speed. About 100 m. A sample, not a full count. Quiet or Ethernet-only cabinets may not advertise. Spectra CV also uses 5.9 GHz C-V2X, which sw33p3r_ cannot hear. IEEE Iteris OUI can also hit other Iteris roadside kit. Pattern match, not that cabinet.",
         builtIn = true,
         rules = listOf(
             // IEEE MA-L registered to Iteris, Inc.
@@ -2980,8 +2980,8 @@ object DefaultCatalog {
         colorIndex = Hue.HACKING,
         kind = SignatureClass.HACKING,
         matchAny = true,
-        notes = "Cheap hobby UART module advertised under a default name (HM-10, JDY, CC41, ESP32 BLE). Common on printers, cars, and DIY. Fieldwatch does not see Classic HC-05/HC-06.",
-        attentionNote = "These default BLE serial names are cheap hobby modules. Some pump/ATM overlays have used boards like this so someone nearby can pull data over Bluetooth. The same modules show up on printers, cars, and DIY. If this radio is loud next to a card reader, treat it with caution and look with your eyes. Not proof of a skimmer. A miss is not a clean bill (name changed, Classic HC-05/HC-06, or cellular). Fieldwatch does not connect and does not try default PINs. Fieldwatch does not see Classic HC-05/HC-06.",
+        notes = "Cheap hobby UART module advertised under a default name (HM-10, JDY, CC41, ESP32 BLE). Common on printers, cars, and DIY. sw33p3r_ does not see Classic HC-05/HC-06.",
+        attentionNote = "These default BLE serial names are cheap hobby modules. Some pump/ATM overlays have used boards like this so someone nearby can pull data over Bluetooth. The same modules show up on printers, cars, and DIY. If this radio is loud next to a card reader, treat it with caution and look with your eyes. Not proof of a skimmer. A miss is not a clean bill (name changed, Classic HC-05/HC-06, or cellular). sw33p3r_ does not connect and does not try default PINs. sw33p3r_ does not see Classic HC-05/HC-06.",
         builtIn = true,
         rules = listOf(
             bleName("HMSoft"),
@@ -3893,7 +3893,7 @@ object DefaultCatalog {
         colorIndex = Hue.HOME_CAM,
         kind = SignatureClass.ISP,
         matchAny = true,
-        notes = "Cisco Aironet / Catalyst / Business access point. Fieldwatch sees AP beacons, not phones or switches. Meraki has its own row.",
+        notes = "Cisco Aironet / Catalyst / Business access point. sw33p3r_ sees AP beacons, not phones or switches. Meraki has its own row.",
         builtIn = true,
         rules = withWifiOuis(
             listOf(

@@ -713,7 +713,7 @@ class SignatureExchangeTest {
             SignatureExchange.parse(log)
             throw AssertionError("expected parse to fail")
         } catch (e: IllegalArgumentException) {
-            assertTrue(e.message!!.contains("Not a Fieldwatch signature pack"))
+            assertTrue(e.message!!.contains("Not a sw33p3r_ signature pack"))
         }
         try {
             SignatureExchange.parse("")

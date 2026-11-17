@@ -33,7 +33,7 @@ object DeviceDetailText {
             out.append('\n').append("## ").append(title).append('\n')
         }
 
-        out.append("Fieldwatch device detail\n")
+        out.append("sw33p3r_ device detail\n")
         out.append(iso.format(Date(now))).append('\n')
         out.append(
             "Experimental. Not a legal identity. Stock Android radios — this is what the OS " +
